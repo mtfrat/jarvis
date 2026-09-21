@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI UX Pro Max"
+  short_description: "Design stronger interfaces with concrete UI, UX, and visual system guidance"
+  default_prompt: "Use $ui-ux-pro-max to design or review this interface, generate a design system when helpful, and apply the relevant UI/UX guidance."

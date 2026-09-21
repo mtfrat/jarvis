@@ -1,0 +1,4 @@
+interface:
+  display_name: "SendGrid Automation"
+  short_description: "Run SendGrid workflows through Rube MCP when its tools are available"
+  default_prompt: "Use $sendgrid-automation to plan or execute this SendGrid workflow, first confirming Rube MCP access and the current SendGrid tool schemas."
