@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+
 import { createExpense } from '../src/lib/expense-service';
 
 async function runCheck() {
