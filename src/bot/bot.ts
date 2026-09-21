@@ -134,7 +134,7 @@ bot.on('message:photo', async (ctx) => {
   try {
     const photos = ctx.message.photo;
     const largestPhoto = photos[photos.length - 1]; // highest quality
-    const file = await ctx.getFile();
+    const file = await ctx.api.getFile(largestPhoto.file_id);
 
     if (!file.file_path) {
       await ctx.reply('❌ No pude obtener la imagen.');
@@ -142,7 +142,8 @@ bot.on('message:photo', async (ctx) => {
     }
 
     const imageBuffer = await downloadTelegramFile(file.file_path);
-    const parsed = await parseExpenseFromImage(imageBuffer, 'image/jpeg');
+    const mimeType = file.file_path.endsWith('.png') ? 'image/png' : 'image/jpeg';
+    const parsed = await parseExpenseFromImage(imageBuffer, mimeType);
 
     await createExpense({
       amount: parsed.amount,

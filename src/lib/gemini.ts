@@ -72,53 +72,66 @@ const extractionJsonSchema = {
 function getSystemInstruction(): string {
   const today = new Date().toISOString().split('T')[0];
   return `Eres Jarvis, un asistente financiero personal experto, astuto y con humor sutil.
-Tu trabajo es procesar entradas de gastos del usuario (texto, audio transcripto o fotos de comprobantes/tickets) y extraer la información en formato estructurado JSON.
+Tu trabajo es procesar entradas de gastos del usuario (texto, audio transcripto o fotos de comprobantes/tickets o capturas de compras online como Mercado Libre) y extraer la información en formato estructurado JSON.
 Fecha de hoy: ${today}.
 
 Reglas de interpretación:
 1. Monto:
    - "15 lucas", "15k" = 15000.
-   - En tickets, busca el TOTAL final a pagar.
+   - En comprobantes, tickets o capturas de pantalla, busca el TOTAL final pagado (descontando cupones si aplica).
    - Si no se especifica moneda, asume "ARS". Si menciona dólares, USD o u$s, asigna "USD".
 2. Cuotas:
    - Si dice "en 3 cuotas", "en 6 pagos", "3 cuotas sin interés", asigna installments_total = 3 o 6, y payment_method = "Tarjeta Crédito".
-   - Si no menciona cuotas, installments_total = 1.
+   - Si no menciona cuotas o dice "1x", installments_total = 1.
 3. Categorías permitidas:
    ${EXPENSE_CATEGORIES.join(', ')}.
 4. Métodos de pago permitidos:
    ${PAYMENT_METHODS.join(', ')}.
 5. Roast / Personalidad:
    - Si es gasto esencial (Supermercado, Medicamentos, Servicios del hogar): sé positivo y práctico.
-   - Si es gasto discrecional (Delivery por 3ra vez, ropa cara, juegos, salidas costosas): haz un comentario irónico y gracioso pero simpático sobre su billetera.`;
+   - Si es gasto discrecional o compras online: haz un comentario irónico y gracioso pero simpático sobre su billetera.`;
 }
 
 async function callGeminiWithFallback(contents: any): Promise<AIExpenseExtraction> {
-  const models = ['gemini-flash-lite-latest', 'gemini-flash-latest'];
+  const models = ['gemini-flash-lite-latest', 'gemini-flash-latest', 'gemini-pro-latest'];
   let lastError: any = null;
 
   for (const model of models) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction: getSystemInstruction(),
-          responseMimeType: 'application/json',
-          responseJsonSchema: extractionJsonSchema,
-          temperature: 0.2,
-        },
-      });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction: getSystemInstruction(),
+            responseMimeType: 'application/json',
+            responseJsonSchema: extractionJsonSchema,
+            temperature: 0.2,
+          },
+        });
 
-      if (response.text) {
-        return JSON.parse(response.text) as AIExpenseExtraction;
+        if (response.text) {
+          return JSON.parse(response.text) as AIExpenseExtraction;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const status = err.status || err.code;
+        const msg = String(err.message || '');
+        const isTransient = status === 503 || status === 429 || msg.includes('503') || msg.includes('demand') || msg.includes('rate');
+
+        if (isTransient && attempt < 3) {
+          console.warn(`[Gemini] Model ${model} intento ${attempt} falló con 503/429. Reintentando en ${attempt * 1200}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1200));
+          continue;
+        }
+
+        console.warn(`[Gemini] Modelo ${model} no disponible, intentando siguiente fallback...`, msg);
+        break;
       }
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Warning: Model ${model} failed, trying next fallback...`, err.message);
     }
   }
 
-  throw lastError || new Error('Failed to generate content with Gemini');
+  throw lastError || new Error('No se pudo procesar el contenido con Gemini.');
 }
 
 export async function parseExpenseFromText(text: string): Promise<AIExpenseExtraction> {
@@ -146,7 +159,7 @@ export async function parseExpenseFromImage(imageBuffer: Buffer, mimeType: strin
         mimeType: mimeType,
       },
     },
-    'Analiza esta foto de ticket o comprobante de compra. Extrae el comercio, total final a pagar, fecha, medio de pago y categoría adecuada.',
+    'Analiza esta foto de ticket, comprobante o captura de pantalla de compra (ej: Mercado Libre, Amazon, ticket fiscal). Extrae el producto o comercio, monto total final pagado, fecha (formato YYYY-MM-DD), método de pago y categoría adecuada.',
   ];
   return callGeminiWithFallback(contents);
 }
