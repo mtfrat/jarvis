@@ -9,6 +9,7 @@
     "bot:dev": "tsx src/bot/dev-poller.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.23.0",
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.49.1",
     "clsx": "^2.1.1",
