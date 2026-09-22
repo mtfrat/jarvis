@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Trash2, Mic, Receipt, MessageSquare, Laptop, Filter } from 'lucide-react';
+import { Search, Trash2, Mic, Receipt, MessageSquare, Laptop, Filter, Download } from 'lucide-react';
 import { Expense, EXPENSE_CATEGORIES } from '@/lib/types';
 
 interface ExpensesTableProps {
@@ -40,6 +40,44 @@ export function ExpensesTable({
       currency: 'ARS',
       maximumFractionDigits: 0,
     }).format(amountArs);
+  };
+
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const headers = [
+      'fecha',
+      'descripcion',
+      'categoria',
+      'metodo_pago',
+      'cuota',
+      'monto',
+      'moneda',
+      'monto_ars',
+      'fuente',
+    ];
+    const rows = filtered.map((e) =>
+      [
+        e.date,
+        e.description,
+        e.category,
+        e.payment_method,
+        `${e.installment_number}/${e.installments_total}`,
+        e.amount,
+        e.currency,
+        e.amount_ars,
+        e.source,
+      ]
+        .map(esc)
+        .join(';')
+    );
+    const csv = '﻿' + [headers.join(';'), ...rows].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gastos-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const renderSourceIcon = (source: string) => {
@@ -117,6 +155,17 @@ export function ExpensesTable({
               ))}
             </select>
           </div>
+
+          {/* Export CSV */}
+          <button
+            onClick={exportCsv}
+            disabled={filtered.length === 0}
+            className="flex items-center gap-1.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 transition disabled:opacity-40 cursor-pointer shrink-0"
+            title="Exportar los gastos filtrados a CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-zinc-400" />
+            CSV
+          </button>
         </div>
       </div>
 

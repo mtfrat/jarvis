@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Check, Trash2 } from 'lucide-react';
+import { X, Check, Trash2, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
-import { Income } from '@/lib/types';
+import { Income, RecurringIncome } from '@/lib/types';
 import { dashboardHeaders } from '@/lib/api-client';
 
 interface NewIncomeModalProps {
@@ -21,12 +21,22 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [incomes, setIncomes] = useState<Income[]>([]);
+  const [recurring, setRecurring] = useState<RecurringIncome[]>([]);
+  const [rDescription, setRDescription] = useState('');
+  const [rAmount, setRAmount] = useState('');
+  const [rCurrency, setRCurrency] = useState<'ARS' | 'USD'>('ARS');
+  const [rSaving, setRSaving] = useState(false);
+  const [rError, setRError] = useState<string | null>(null);
 
   const fetchIncomes = useCallback(async () => {
     try {
       const res = await fetch(`/api/incomes?month=${selectedMonth}`, { headers: dashboardHeaders });
       if (res.ok) {
         setIncomes(await res.json());
+      }
+      const resR = await fetch('/api/incomes/recurring', { headers: dashboardHeaders });
+      if (resR.ok) {
+        setRecurring(await resR.json());
       }
     } catch {
       // keep previous list
@@ -98,6 +108,57 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
     }
   };
 
+  const handleRecurringSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rDescription.trim() || !rAmount || Number(rAmount) <= 0) {
+      setRError('Ingresá una descripción y un monto válido.');
+      return;
+    }
+    setRSaving(true);
+    setRError(null);
+    try {
+      const res = await fetch('/api/incomes/recurring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...dashboardHeaders },
+        body: JSON.stringify({
+          description: rDescription.trim(),
+          amount: Number(rAmount),
+          currency: rCurrency,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Error al guardar el ingreso recurrente.');
+      }
+      setRDescription('');
+      setRAmount('');
+      await fetchIncomes();
+      onIncomeAdded();
+    } catch (err) {
+      setRError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
+      setRSaving(false);
+    }
+  };
+
+  const handleRecurringDelete = async (id: string) => {
+    if (!confirm('¿Eliminar este ingreso recurrente? Se deja de sumar al balance.')) return;
+    try {
+      const res = await fetch(`/api/incomes/recurring?id=${id}`, {
+        method: 'DELETE',
+        headers: dashboardHeaders,
+      });
+      if (res.ok) {
+        await fetchIncomes();
+        onIncomeAdded();
+      } else {
+        alert('No se pudo eliminar el ingreso recurrente.');
+      }
+    } catch (err) {
+      console.error('Error deleting recurring income:', err);
+    }
+  };
+
   const formatIncomeAmount = (inc: Income) =>
     new Intl.NumberFormat('es-AR', {
       style: 'currency',
@@ -107,12 +168,12 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-[#121215] border border-[#27272a] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+      <div className="bg-[#121215] border border-[#27272a] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="p-5 border-b border-[#27272a] flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-white">Ingresos</h2>
-            <p className="text-xs text-zinc-400 mt-0.5">Carga y administrá tus ingresos del mes</p>
+            <p className="text-xs text-zinc-400 mt-0.5">Cargá los del mes y los que se repiten</p>
           </div>
           <button
             onClick={onClose}
@@ -198,7 +259,7 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
         </form>
 
         {/* Month incomes list */}
-        <div className="p-5 max-h-64 overflow-y-auto">
+        <div className="p-5 max-h-52 overflow-y-auto">
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
             Ingresos de {selectedMonth}
           </p>
@@ -231,6 +292,86 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
           ) : (
             <p className="text-xs text-zinc-600">Sin ingresos registrados en este mes.</p>
           )}
+        </div>
+
+        {/* Recurring incomes */}
+        <div className="p-5 border-t border-[#27272a]">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <RefreshCw className="w-3 h-3" />
+            Recurrentes (se suman al balance cada mes)
+          </p>
+          <p className="text-[11px] text-zinc-600 mb-2">
+            Si también lo cargás a mano, borrá la plantilla para no duplicarlo.
+          </p>
+
+          {recurring.length > 0 && (
+            <div className="space-y-1 mb-3">
+              {recurring.map((r) => (
+                <div key={r.id} className="flex items-center justify-between text-xs py-1.5 group">
+                  <span className="text-zinc-200 truncate">{r.description}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-emerald-400 font-semibold">
+                      {new Intl.NumberFormat('es-AR', {
+                        style: 'currency',
+                        currency: r.currency,
+                        maximumFractionDigits: 0,
+                      }).format(r.amount)}
+                    </span>
+                    <button
+                      onClick={() => handleRecurringDelete(r.id)}
+                      className="p-1 rounded text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10 transition opacity-60 group-hover:opacity-100"
+                      title="Eliminar ingreso recurrente"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <form onSubmit={handleRecurringSubmit} className="space-y-2">
+            {rError && (
+              <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[11px]">
+                {rError}
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-2">
+              <input
+                type="text"
+                placeholder="Ej: Sueldo"
+                value={rDescription}
+                onChange={(e) => setRDescription(e.target.value)}
+                className="col-span-3 sm:col-span-1 bg-[#18181b] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+              />
+              <input
+                type="number"
+                step="any"
+                min="1"
+                placeholder="Monto"
+                value={rAmount}
+                onChange={(e) => setRAmount(e.target.value)}
+                className="bg-[#18181b] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+              <div className="flex gap-1.5">
+                <select
+                  value={rCurrency}
+                  onChange={(e) => setRCurrency(e.target.value as 'ARS' | 'USD')}
+                  className="bg-[#18181b] border border-[#27272a] rounded-lg px-1.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="ARS">ARS</option>
+                  <option value="USD">USD</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={rSaving}
+                  className="flex-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/90 hover:bg-emerald-400 text-black transition disabled:opacity-50 cursor-pointer"
+                >
+                  {rSaving ? '...' : 'Agregar'}
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
       </div>
     </div>

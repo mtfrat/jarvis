@@ -1,6 +1,6 @@
 import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 import { normalizeToArs } from './currency';
-import { Income } from './types';
+import { Income, RecurringIncome } from './types';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 
 export interface CreateIncomeParams {
@@ -78,5 +78,59 @@ export async function getIncomes(options?: { month?: string }): Promise<Income[]
 export async function deleteIncome(id: string): Promise<boolean> {
   if (!isSupabaseConfigured) return false;
   const { error } = await supabaseAdmin.from('incomes').delete().eq('id', id);
+  return !error;
+}
+
+export async function getRecurringIncomes(): Promise<RecurringIncome[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabaseAdmin
+    .from('recurring_incomes')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('Error fetching recurring incomes:', error);
+    return [];
+  }
+  return (data || []) as RecurringIncome[];
+}
+
+export async function createRecurringIncome(params: {
+  amount: number;
+  currency: 'ARS' | 'USD';
+  description: string;
+}): Promise<RecurringIncome> {
+  if (!Number.isFinite(params.amount) || params.amount <= 0) {
+    throw new Error(`Invalid amount: ${params.amount}`);
+  }
+  if (params.currency !== 'ARS' && params.currency !== 'USD') {
+    throw new Error(`Invalid currency: ${params.currency}`);
+  }
+  if (!params.description?.trim()) {
+    throw new Error('Missing description');
+  }
+  if (!isSupabaseConfigured) {
+    throw new Error('Supabase not configured: recurring income was not saved.');
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('recurring_incomes')
+    .insert({
+      description: params.description.trim(),
+      amount: params.amount,
+      currency: params.currency,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error inserting recurring income:', error);
+    throw new Error(`Failed to save recurring income: ${error.message}`);
+  }
+  return data as RecurringIncome;
+}
+
+export async function deleteRecurringIncome(id: string): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  const { error } = await supabaseAdmin.from('recurring_incomes').delete().eq('id', id);
   return !error;
 }

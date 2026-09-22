@@ -1,6 +1,6 @@
 import { Bot } from 'grammy';
 import { parseExpenseFromText, parseExpenseFromAudio, parseExpenseFromImage } from '../lib/gemini';
-import { createExpense } from '../lib/expense-service';
+import { createExpense, getDashboardStats } from '../lib/expense-service';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN || 'placeholder_bot_token';
@@ -62,9 +62,51 @@ bot.command('start', async (ctx) => {
     `🎙️ *Voz:* Mandame un audio diciendo en qué gastaste y cuánto.\n` +
     `📸 *Foto:* Mandame la foto de un ticket o factura de compra.\n\n` +
     `Divido automáticamente las compras en cuotas para los próximos meses y categorizo todo en tu dashboard.\n\n` +
+    `📊 *Resumen:* Escribí _/resumen_ y te cuento cómo viene el mes (gastos, racha, proyección y balance).\n\n` +
     `Tu Telegram ID es: \`${ctx.from?.id}\``;
 
   await ctx.reply(msg, { parse_mode: 'Markdown' });
+});
+
+// Command: /resumen — quick month status
+bot.command('resumen', async (ctx) => {
+  if (!isSupabaseConfigured) {
+    await ctx.reply(
+      '⚠️ *Base de datos no configurada*\n\nCompletá `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en `.env.local`.',
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+
+  await ctx.replyWithChatAction('typing');
+  try {
+    const stats = await getDashboardStats();
+    const fmt = (ars: number) =>
+      new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(ars);
+
+    const lines = [
+      '📊 *Resumen del mes*',
+      `💰 Gastado: ${fmt(stats.totalSpentArs)}`,
+      stats.previousMonthComparisonPercent !== null
+        ? `${stats.previousMonthComparisonPercent <= 0 ? '🟢' : '🔴'} ${Math.abs(stats.previousMonthComparisonPercent)}% ${stats.isCurrentMonth ? 'vs mes anterior a esta fecha' : 'vs mes anterior'}`
+        : null,
+      stats.projectedMonthTotalArs !== null
+        ? `🎯 Proyección de cierre: ${fmt(stats.projectedMonthTotalArs)}`
+        : null,
+      `🔥 Racha sin gastos: ${stats.streakDaysWithoutSpending ?? 0} días`,
+      `⚖️ Balance: ${fmt(stats.balanceArs)} (ingresos ${fmt(stats.totalIncomeArs)})`,
+      stats.topCategory ? `📂 Mayor categoría: ${stats.topCategory.category} (${stats.topCategory.percentage}%)` : null,
+      stats.futureInstallmentsTotalArs > 0 ? `📅 Cuotas comprometidas6m: ${fmt(stats.futureInstallmentsTotalArs)}` : null,
+      stats.budgetsExceeded.length > 0
+        ? `🚨 Presupuestos excedidos: ${stats.budgetsExceeded.join(', ')}`
+        : null,
+    ].filter(Boolean);
+
+    await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+  } catch (error) {
+    console.error('Error building /resumen:', error);
+    await ctx.reply('❌ No pude armar el resumen. Probá de nuevo en un momento.');
+  }
 });
 
 // Helper: Format expense registered response

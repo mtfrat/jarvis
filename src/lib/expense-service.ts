@@ -163,7 +163,9 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
       totalSpentArs: 0,
       totalSpentUsd: 0,
       totalIncomeArs: 0,
+      recurringIncomeArs: 0,
       balanceArs: 0,
+      budgetsExceeded: [],
       exchangeRate: await getUsdExchangeRate(),
       isCurrentMonth,
       previousMonthComparisonPercent: null,
@@ -214,13 +216,26 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   const currentRate = await getUsdExchangeRate();
   const totalSpentUsd = Math.round((totalSpentArs / currentRate) * 100) / 100;
 
-  // Incomes and balance for the selected month
+  // Incomes and balance for the selected month (manual + recurring templates)
   const { data: incomeRows } = await supabaseAdmin
     .from('incomes')
     .select('amount_ars')
     .gte('date', currentMonthStart)
     .lte('date', currentMonthEnd);
-  const totalIncomeArs = (incomeRows || []).reduce((sum, r) => sum + Number(r.amount_ars), 0);
+  const manualIncomeArs = (incomeRows || []).reduce((sum, r) => sum + Number(r.amount_ars), 0);
+
+  const { data: recurringRows } = await supabaseAdmin
+    .from('recurring_incomes')
+    .select('amount, currency, created_at');
+  const monthKey = format(targetDate, 'yyyy-MM');
+  const recurringIncomeArs = (recurringRows || [])
+    .filter((r) => monthKey >= String(r.created_at).slice(0, 7))
+    .reduce((sum, r) => {
+      const amount = Number(r.amount);
+      return sum + (r.currency === 'USD' ? amount * currentRate : amount);
+    }, 0);
+
+  const totalIncomeArs = manualIncomeArs + recurringIncomeArs;
   const balanceArs = totalIncomeArs - totalSpentArs;
 
   // Comparison %: current month compares same-day-to-date (fair pace); past months compare full totals
@@ -310,6 +325,15 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     .sort((a, b) => b.amountArs - a.amountArs);
 
   const topCategory = categoryBreakdown.length > 0 ? categoryBreakdown[0] : null;
+
+  // Budgets exceeded for this month
+  const { data: budgetRows } = await supabaseAdmin
+    .from('budgets')
+    .select('category, monthly_amount');
+  const spentByCat = new Map(categoryBreakdown.map((c) => [c.category, c.amountArs]));
+  const budgetsExceeded = (budgetRows || [])
+    .filter((b) => (spentByCat.get(b.category) || 0) > Number(b.monthly_amount))
+    .map((b) => b.category);
 
   // 5. Day of week analysis (0=Sunday, 1=Monday... 6=Saturday)
   const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -443,7 +467,9 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     totalSpentArs,
     totalSpentUsd,
     totalIncomeArs,
+    recurringIncomeArs,
     balanceArs,
+    budgetsExceeded,
     exchangeRate: currentRate,
     isCurrentMonth,
     previousMonthComparisonPercent,

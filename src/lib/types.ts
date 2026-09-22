@@ -71,11 +71,28 @@ export interface Income {
   source: string;
 }
 
+export interface RecurringIncome {
+  id: string;
+  created_at: string;
+  description: string;
+  amount: number;
+  currency: Currency;
+}
+
+export interface Budget {
+  id: string;
+  created_at: string;
+  category: string;
+  monthly_amount: number;
+}
+
 export interface DashboardStats {
   totalSpentArs: number;
   totalSpentUsd: number;
   totalIncomeArs: number;
+  recurringIncomeArs: number;
   balanceArs: number;
+  budgetsExceeded: string[];
   exchangeRate: number;
   isCurrentMonth: boolean;
   previousMonthComparisonPercent: number | null;

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { TrendingDown, TrendingUp, CreditCard, PieChart, CalendarDays, Wallet, Flame, PiggyBank } from 'lucide-react';
+import { TrendingDown, TrendingUp, CreditCard, PieChart, CalendarDays, Wallet, Flame, PiggyBank, RefreshCw } from 'lucide-react';
 import { DashboardStats } from '@/lib/types';
 
 interface KpiCardsProps {
@@ -76,8 +76,23 @@ export function KpiCards({ stats, currency, exchangeRate }: KpiCardsProps) {
           {formatMoney(stats.balanceArs)}
         </div>
         <div className="mt-3 text-xs text-zinc-400">
-          Ingresos:{' '}
-          <span className="text-emerald-400 font-semibold">{formatMoney(stats.totalIncomeArs)}</span> este mes
+          {stats.recurringIncomeArs > 0 ? (
+            <>
+              Ingresos:{' '}
+              <span className="text-emerald-400 font-semibold">{formatMoney(stats.totalIncomeArs)}</span>
+              <span className="text-zinc-500">
+                {' '}
+                (manuales {formatMoney(stats.totalIncomeArs - stats.recurringIncomeArs)} · recurrentes{' '}
+                {formatMoney(stats.recurringIncomeArs)})
+              </span>
+            </>
+          ) : (
+            <>
+              Ingresos:{' '}
+              <span className="text-emerald-400 font-semibold">{formatMoney(stats.totalIncomeArs)}</span> este
+              mes
+            </>
+          )}
         </div>
       </div>
 
@@ -165,6 +180,19 @@ export function KpiCards({ stats, currency, exchangeRate }: KpiCardsProps) {
           ) : (
             'Registra gastos para ver métricas'
           )}
+        </div>
+      </div>
+      {/* KPI: Recurrentes */}
+      <div className="bg-[#121215] border border-[#27272a] rounded-xl p-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500">Ingresos Recurrentes</p>
+          <p className="text-xl font-semibold text-white mt-1 font-mono tracking-tight">
+            {formatMoney(stats.recurringIncomeArs)}
+          </p>
+          <div className="mt-3 text-xs text-zinc-400">Se suman al balance cada mes</div>
+        </div>
+        <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 shrink-0">
+          <RefreshCw className="w-4 h-4" />
         </div>
       </div>
     </div>

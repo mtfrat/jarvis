@@ -70,7 +70,7 @@ export function NewExpenseModal({ isOpen, onClose, onExpenseAdded }: NewExpenseM
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-      <div className="bg-[#121215] border border-[#27272a] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+      <div className="bg-[#121215] border border-[#27272a] rounded-2xl w-full max-w-md overflow-hidden shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="p-5 border-b border-[#27272a] flex items-center justify-between">
           <div>

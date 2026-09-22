@@ -7,6 +7,7 @@ import { ChartsSection } from '@/components/ChartsSection';
 import { ExpensesTable } from '@/components/ExpensesTable';
 import { NewExpenseModal } from '@/components/NewExpenseModal';
 import { NewIncomeModal } from '@/components/NewIncomeModal';
+import { BudgetPanel } from '@/components/BudgetPanel';
 import { DashboardStats, Expense } from '@/lib/types';
 import { AlertCircle, RefreshCw, Terminal, ExternalLink } from 'lucide-react';
 import { dashboardHeaders } from '@/lib/api-client';
@@ -136,6 +137,7 @@ export default function DashboardPage() {
         {stats && (
           <>
             <KpiCards stats={stats} currency={currency} exchangeRate={exchangeRate} />
+            <BudgetPanel stats={stats} currency={currency} exchangeRate={exchangeRate} />
             <ChartsSection stats={stats} currency={currency} exchangeRate={exchangeRate} />
             <ExpensesTable
               expenses={expenses}
