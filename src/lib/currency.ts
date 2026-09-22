@@ -13,16 +13,22 @@ export async function getUsdExchangeRate(): Promise<number> {
     });
     if (res.ok) {
       const data = await res.json();
-      const rate = Number(data.venta) || Number(data.promedio) || 1200;
-      cachedRate = { rate, timestamp: now };
-      return rate;
+      const rate = Number(data.venta) || Number(data.promedio);
+      if (rate > 0) {
+        cachedRate = { rate, timestamp: now };
+        return rate;
+      }
     }
   } catch (err) {
     console.error('Error fetching exchange rate from DolarApi:', err);
   }
 
   // Fallback if API fails or offline
-  return cachedRate?.rate || 1200;
+  const fallback = cachedRate?.rate;
+  console.warn(
+    `[currency] DolarApi no respondió — usando ${fallback ? 'cache vencida' : 'fallback hardcodeado (1200)'}.`
+  );
+  return fallback || 1200;
 }
 
 export async function normalizeToArs(amount: number, currency: 'ARS' | 'USD'): Promise<{ amountArs: number; exchangeRate: number | null }> {

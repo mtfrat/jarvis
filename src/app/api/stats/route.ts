@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getDashboardStats } from '@/lib/expense-service';
+import { requireDashboardAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    const authError = requireDashboardAuth(request);
+    if (authError) return authError;
+
     const { searchParams } = new URL(request.url);
     const month = searchParams.get('month') || undefined;
     const stats = await getDashboardStats(month);

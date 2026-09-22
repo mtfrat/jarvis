@@ -17,7 +17,7 @@ create table if not exists public.expenses (
     installment_group_id uuid,
     user_telegram_id bigint,
     user_name text,
-    source varchar(30) not null default 'manual',
+    source varchar(30) not null default 'dashboard_manual',
     raw_input text,
     metadata jsonb default '{}'::jsonb
 );
@@ -31,10 +31,11 @@ create index if not exists idx_expenses_installment_group on public.expenses(ins
 -- Enable Row Level Security (RLS)
 alter table public.expenses enable row level security;
 
--- Permissive policy for read/write with anon and service_role keys
-create policy "Allow all operations for anon and service_role"
+-- Only the server (service_role via SUPABASE_SERVICE_ROLE_KEY) may touch this table.
+-- The anon key is public by definition: never grant it access here.
+create policy "Full access for service_role"
 on public.expenses
 for all
-to anon, authenticated, service_role
+to service_role
 using (true)
 with check (true);

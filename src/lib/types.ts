@@ -59,16 +59,42 @@ export interface AIExpenseExtraction {
   items?: Array<{ name: string; price?: number }>;
 }
 
+export interface Income {
+  id: string;
+  created_at: string;
+  date: string; // YYYY-MM-DD
+  amount: number;
+  currency: Currency;
+  amount_ars: number;
+  exchange_rate: number | null;
+  description: string;
+  source: string;
+}
+
 export interface DashboardStats {
   totalSpentArs: number;
   totalSpentUsd: number;
+  totalIncomeArs: number;
+  balanceArs: number;
+  exchangeRate: number;
+  isCurrentMonth: boolean;
   previousMonthComparisonPercent: number | null;
   dailyAverageArs: number;
-  pendingInstallmentsCount: number;
-  pendingInstallmentsAmountArs: number;
+  projectedMonthTotalArs: number | null;
+  streakDaysWithoutSpending: number | null;
+  installmentsMonthCount: number;
+  installmentsMonthAmountArs: number;
+  futureInstallmentsTotalArs: number;
   topCategory: { category: string; amountArs: number; percentage: number } | null;
-  categoryBreakdown: Array<{ category: string; amountArs: number; count: number; percentage: number }>;
+  categoryBreakdown: Array<{
+    category: string;
+    amountArs: number;
+    count: number;
+    percentage: number;
+    deltaPercent: number | null;
+  }>;
   dayOfWeekBreakdown: Array<{ dayName: string; dayIndex: number; amountArs: number; count: number }>;
   monthlyTimeline: Array<{ date: string; amountArs: number }>;
   futureInstallments: Array<{ month: string; amountArs: number; count: number }>;
+  subscriptions: Array<{ description: string; amountArs: number; months: number; lastDate: string }>;
 }

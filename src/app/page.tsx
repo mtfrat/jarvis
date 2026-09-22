@@ -6,8 +6,10 @@ import { KpiCards } from '@/components/KpiCards';
 import { ChartsSection } from '@/components/ChartsSection';
 import { ExpensesTable } from '@/components/ExpensesTable';
 import { NewExpenseModal } from '@/components/NewExpenseModal';
+import { NewIncomeModal } from '@/components/NewIncomeModal';
 import { DashboardStats, Expense } from '@/lib/types';
 import { AlertCircle, RefreshCw, Terminal, ExternalLink } from 'lucide-react';
+import { dashboardHeaders } from '@/lib/api-client';
 
 export default function DashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(() => {
@@ -21,35 +23,28 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isIncomeModalOpen, setIsIncomeModalOpen] = useState<boolean>(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       // Fetch stats and expenses in parallel
       const [statsRes, expRes] = await Promise.all([
-        fetch(`/api/stats?month=${selectedMonth}`),
-        fetch(`/api/expenses?month=${selectedMonth}`),
+        fetch(`/api/stats?month=${selectedMonth}`, { headers: dashboardHeaders }),
+        fetch(`/api/expenses?month=${selectedMonth}`, { headers: dashboardHeaders }),
       ]);
 
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
+        if (statsData.exchangeRate) {
+          setExchangeRate(statsData.exchangeRate);
+        }
       }
 
       if (expRes.ok) {
         const expData = await expRes.json();
         setExpenses(expData);
-      }
-
-      // Fetch exchange rate
-      try {
-        const dollarRes = await fetch('https://dolarapi.com/v1/dolares/blue');
-        if (dollarRes.ok) {
-          const dollarData = await dollarRes.json();
-          setExchangeRate(Number(dollarData.venta) || 1200);
-        }
-      } catch {
-        // fallback
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -62,12 +57,23 @@ export default function DashboardPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleDeleteExpense = async (id: string) => {
-    if (!confirm('¿Estás seguro de que deseas eliminar este gasto?')) return;
+  const handleDeleteExpense = async (item: Expense) => {
+    const msg = item.installment_group_id
+      ? `Este gasto tiene ${item.installments_total} cuotas. Se eliminarán TODAS las cuotas de "${item.description}". ¿Continuar?`
+      : '¿Estás seguro de que deseas eliminar este gasto?';
+    if (!confirm(msg)) return;
     try {
-      const res = await fetch(`/api/expenses?id=${id}`, { method: 'DELETE' });
+      const params = item.installment_group_id
+        ? `group_id=${item.installment_group_id}`
+        : `id=${item.id}`;
+      const res = await fetch(`/api/expenses?${params}`, {
+        method: 'DELETE',
+        headers: dashboardHeaders,
+      });
       if (res.ok) {
         fetchData();
+      } else {
+        alert('No se pudo eliminar el gasto.');
       }
     } catch (err) {
       console.error('Error deleting expense:', err);
@@ -82,6 +88,7 @@ export default function DashboardPage() {
         currency={currency}
         onCurrencyToggle={() => setCurrency((prev) => (prev === 'ARS' ? 'USD' : 'ARS'))}
         onOpenNewExpense={() => setIsModalOpen(true)}
+        onOpenNewIncome={() => setIsIncomeModalOpen(true)}
         exchangeRate={exchangeRate}
       />
 
@@ -147,9 +154,17 @@ export default function DashboardPage() {
         onExpenseAdded={fetchData}
       />
 
+      {/* New Income Modal */}
+      <NewIncomeModal
+        isOpen={isIncomeModalOpen}
+        onClose={() => setIsIncomeModalOpen(false)}
+        onIncomeAdded={fetchData}
+        selectedMonth={selectedMonth}
+      />
+
       {/* Minimal Footer */}
       <footer className="border-t border-[#27272a] py-6 text-center text-xs text-zinc-500">
-        Jarvis Finance — Asistente Inteligente de Gastos &middot; Impulsado por Gemini 2.0 Flash
+        Jarvis Finance — Asistente Inteligente de Gastos &middot; Impulsado por Gemini Flash
       </footer>
     </div>
   );

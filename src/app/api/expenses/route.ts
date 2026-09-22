@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getExpenses, createExpense, deleteExpense } from '@/lib/expense-service';
+import { getExpenses, createExpense, deleteExpense, deleteInstallmentGroup } from '@/lib/expense-service';
+import { requireDashboardAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
+    const authError = requireDashboardAuth(request);
+    if (authError) return authError;
+
     const { searchParams } = new URL(request.url);
     const month = searchParams.get('month') || undefined;
-    const category = searchParams.get('category') || undefined;
-    const search = searchParams.get('search') || undefined;
 
-    const expenses = await getExpenses({ month, category, search });
+    const expenses = await getExpenses({ month });
     return NextResponse.json(expenses);
   } catch (error) {
     console.error('Error in GET /api/expenses:', error);
@@ -20,6 +22,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const authError = requireDashboardAuth(request);
+    if (authError) return authError;
+
     const body = await request.json();
     if (!body.amount || !body.description || !body.category) {
       return NextResponse.json({ error: 'Monto, descripción y categoría son requeridos' }, { status: 400 });
@@ -45,13 +50,22 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const authError = requireDashboardAuth(request);
+    if (authError) return authError;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
-    if (!id) {
+    const groupId = searchParams.get('group_id');
+    if (!id && !groupId) {
       return NextResponse.json({ error: 'ID es requerido' }, { status: 400 });
     }
 
-    const success = await deleteExpense(id);
+    const success = groupId
+      ? await deleteInstallmentGroup(groupId)
+      : await deleteExpense(id!);
+    if (!success) {
+      return NextResponse.json({ error: 'Failed to delete expense' }, { status: 500 });
+    }
     return NextResponse.json({ success });
   } catch (error) {
     console.error('Error in DELETE /api/expenses:', error);

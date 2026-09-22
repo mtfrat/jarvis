@@ -6,11 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx scripts/test-installments.ts && tsx scripts/test-validation.ts",
     "bot:dev": "tsx src/bot/dev-poller.ts"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",
-    "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.49.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",

@@ -8,7 +8,7 @@ web
 
 ## Stack
 
-Next.js 15 (App Router, TypeScript), Tailwind CSS, Recharts, Lucide Icons, grammY (Telegram bot), Google Gemini API (Multimodal 2.0/1.5 Flash), Supabase (PostgreSQL).
+Next.js 15 (App Router, TypeScript), Tailwind CSS, Recharts, Lucide Icons, grammY (Telegram bot), Google Gemini API (gemini-flash / flash-lite / pro), Supabase (PostgreSQL).
 
 ## Users
 
@@ -33,7 +33,7 @@ Frictionless capture at the moment of spending (via natural audio, receipt snaps
 - AI Engine: Google Gemini API (single-model multimodal processing for transcription, vision, and extraction).
 - Installments Engine: Automatically detects purchases in installments (e.g., "$60.000 en 3 cuotas") and projects records across upcoming months.
 - Multicurrency: Argentine Peso (ARS) and US Dollar (USD) with real-time conversion rate (DolarApi).
-- Security: Telegram user ID whitelist to prevent unauthorized expense creation.
+- Security: Telegram user ID whitelist (fail-closed) to prevent unauthorized expense creation; dashboard API requires `NEXT_PUBLIC_DASHBOARD_SECRET` header; Telegram webhook verified via `TELEGRAM_WEBHOOK_SECRET`; RLS restricted to `service_role` (anon key has no table access).
 - Bot Tone: Balanced, helpful, with a subtle witty roast on excessive or discretionary spending.
 
 ## Brand Commitments

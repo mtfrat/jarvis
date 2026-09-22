@@ -4,7 +4,13 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const handler = webhookCallback(bot, 'std/http');
+const secretToken = process.env.TELEGRAM_WEBHOOK_SECRET;
+if (!secretToken) {
+  console.warn(
+    '⚠️ TELEGRAM_WEBHOOK_SECRET no está definido: el webhook de Telegram se acepta sin verificar.'
+  );
+}
+const handler = webhookCallback(bot, 'std/http', secretToken ? { secretToken } : undefined);
 
 export async function POST(req: Request) {
   if (!process.env.TELEGRAM_BOT_TOKEN) {

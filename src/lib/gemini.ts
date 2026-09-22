@@ -1,17 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
+import { format } from 'date-fns';
 import { AIExpenseExtraction, EXPENSE_CATEGORIES, PAYMENT_METHODS } from './types';
-
-// Auto-load .env.local for standalone scripts if not already loaded by Next.js
-if (!process.env.GEMINI_API_KEY) {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const dotenv = require('dotenv');
-    dotenv.config({ path: '.env.local' });
-    dotenv.config();
-  } catch {
-    // fallback
-  }
-}
 
 const apiKey = process.env.GEMINI_API_KEY || '';
 const ai = new GoogleGenAI({ apiKey });
@@ -70,7 +59,7 @@ const extractionJsonSchema = {
 };
 
 function getSystemInstruction(): string {
-  const today = new Date().toISOString().split('T')[0];
+  const today = format(new Date(), 'yyyy-MM-dd');
   return `Eres Jarvis, un asistente financiero personal experto, astuto y con humor sutil.
 Tu trabajo es procesar entradas de gastos del usuario (texto, audio transcripto o fotos de comprobantes/tickets o capturas de compras online como Mercado Libre) y extraer la información en formato estructurado JSON.
 Fecha de hoy: ${today}.

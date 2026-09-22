@@ -8,7 +8,7 @@ interface ExpensesTableProps {
   expenses: Expense[];
   currency: 'ARS' | 'USD';
   exchangeRate: number;
-  onDeleteExpense: (id: string) => void;
+  onDeleteExpense: (expense: Expense) => void;
 }
 
 export function ExpensesTable({
@@ -79,6 +79,12 @@ export function ExpensesTable({
           <h3 className="text-sm font-semibold text-white tracking-wide">Movimientos del Período</h3>
           <p className="text-xs text-zinc-400 mt-0.5">
             {filtered.length} {filtered.length === 1 ? 'gasto registrado' : 'gastos registrados'}
+            {filtered.length > 0 &&
+              ` · promedio ${formatMoney(
+                filtered.reduce((sum, e) => sum + Number(e.amount_ars), 0) / filtered.length,
+                'ARS',
+                0
+              )}`}
           </p>
         </div>
 
@@ -165,9 +171,9 @@ export function ExpensesTable({
                   </td>
                   <td className="py-3 px-4 text-center">
                     <button
-                      onClick={() => onDeleteExpense(item.id)}
+                      onClick={() => onDeleteExpense(item)}
                       className="p-1.5 rounded-md text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition opacity-60 group-hover:opacity-100 cursor-pointer"
-                      title="Eliminar gasto"
+                      title={item.installment_group_id ? 'Eliminar todas las cuotas' : 'Eliminar gasto'}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

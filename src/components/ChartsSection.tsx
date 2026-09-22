@@ -14,6 +14,7 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
+import { Repeat } from 'lucide-react';
 import { DashboardStats } from '@/lib/types';
 
 interface ChartsSectionProps {
@@ -55,6 +56,7 @@ export function ChartsSection({ stats, currency, exchangeRate }: ChartsSectionPr
     name: item.category,
     value: item.amountArs,
     percentage: item.percentage,
+    delta: item.deltaPercent,
     color: CATEGORY_COLORS[item.category] || '#a1a1aa',
   }));
 
@@ -178,6 +180,21 @@ export function ChartsSection({ stats, currency, exchangeRate }: ChartsSectionPr
                     </div>
                     <div className="flex items-center gap-2 font-mono">
                       <span className="text-zinc-400">{item.percentage}%</span>
+                      {item.delta !== null && (
+                        <span
+                          className={
+                            item.delta > 0
+                              ? 'text-rose-400'
+                              : item.delta < 0
+                                ? 'text-emerald-400'
+                                : 'text-zinc-500'
+                          }
+                          title="Variación vs mes anterior"
+                        >
+                          {item.delta > 0 ? '▲' : item.delta < 0 ? '▼' : '•'}
+                          {Math.abs(item.delta)}%
+                        </span>
+                      )}
                       <span className="text-zinc-200 font-medium">{formatMoney(item.value)}</span>
                     </div>
                   </div>
@@ -261,6 +278,50 @@ export function ChartsSection({ stats, currency, exchangeRate }: ChartsSectionPr
           )}
         </div>
       </div>
+
+      {/* 5. Suscripciones detectadas */}
+      {stats.subscriptions.length > 0 && (
+        <div className="lg:col-span-2 bg-[#121215] border border-[#27272a] rounded-xl p-5">
+          <div className="flex items-start justify-between mb-3 gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white tracking-wide">Suscripciones Detectadas</h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                Gastos recurrentes: ≥3 meses con monto estable (±10%)
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500">Total mensual</p>
+              <p className="text-sm font-bold text-emerald-400 font-mono">
+                {formatMoney(stats.subscriptions.reduce((sum, sub) => sum + sub.amountArs, 0))}
+              </p>
+            </div>
+          </div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {stats.subscriptions.map((sub) => (
+              <div
+                key={sub.description}
+                className="flex items-center justify-between text-xs py-1.5 border-b border-[#27272a] last:border-0 gap-3"
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Repeat className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="text-zinc-200 truncate">{sub.description}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 shrink-0">
+                    {sub.months} meses
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-zinc-500 font-mono text-[10px] hidden sm:inline">
+                    út: {sub.lastDate}
+                  </span>
+                  <span className="font-mono text-white font-semibold">
+                    {formatMoney(sub.amountArs)}/mes
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

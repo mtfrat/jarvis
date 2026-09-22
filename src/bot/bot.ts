@@ -1,6 +1,7 @@
 import { Bot } from 'grammy';
 import { parseExpenseFromText, parseExpenseFromAudio, parseExpenseFromImage } from '../lib/gemini';
 import { createExpense } from '../lib/expense-service';
+import { isSupabaseConfigured } from '../lib/supabase';
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN || 'placeholder_bot_token';
 export const bot = new Bot(botToken);
@@ -12,7 +13,7 @@ function isUserAuthorized(userId?: number): boolean {
     .map(id => id.trim())
     .filter(Boolean);
 
-  if (allowedIds.length === 0) return true; // If no whitelist configured, allow all during setup
+  if (allowedIds.length === 0) return false; // fail closed: sin whitelist configurada no entra nadie
   return userId ? allowedIds.includes(String(userId)) : false;
 }
 
@@ -31,6 +32,19 @@ bot.use(async (ctx, next) => {
   if (!isUserAuthorized(userId)) {
     await ctx.reply(
       '⛔ *Acceso no autorizado*\n\nTu ID de Telegram (' + userId + ') no está en la lista de usuarios permitidos.\nAgrega este ID en la variable `TELEGRAM_ALLOWED_USER_IDS` de tu configuración.',
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+  return next();
+});
+
+// Middleware: DB must be configured before doing any work (except commands like /start)
+bot.use(async (ctx, next) => {
+  const text = ctx.message && 'text' in ctx.message ? ctx.message.text ?? '' : '';
+  if (!isSupabaseConfigured && !text.startsWith('/')) {
+    await ctx.reply(
+      '⚠️ *Base de datos no configurada*\n\nEl gasto NO se guardó. Completá `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en `.env.local`.',
       { parse_mode: 'Markdown' }
     );
     return;

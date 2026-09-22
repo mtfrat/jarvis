@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Bot, Plus, Calendar, DollarSign, Sparkles } from 'lucide-react';
+import { Bot, Plus, Calendar, DollarSign, Banknote } from 'lucide-react';
 
 interface HeaderProps {
   selectedMonth: string;
@@ -9,6 +9,7 @@ interface HeaderProps {
   currency: 'ARS' | 'USD';
   onCurrencyToggle: () => void;
   onOpenNewExpense: () => void;
+  onOpenNewIncome: () => void;
   exchangeRate: number;
 }
 
@@ -18,6 +19,7 @@ export function Header({
   currency,
   onCurrencyToggle,
   onOpenNewExpense,
+  onOpenNewIncome,
   exchangeRate,
 }: HeaderProps) {
   return (
@@ -63,6 +65,15 @@ export function Header({
             <span className="text-[10px] text-zinc-400 hidden md:inline">
               (${exchangeRate})
             </span>
+          </button>
+
+          {/* Add Income Button */}
+          <button
+            onClick={onOpenNewIncome}
+            className="flex items-center gap-1.5 bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded-lg px-3 py-1.5 text-xs sm:text-sm font-medium transition text-zinc-200 cursor-pointer"
+          >
+            <Banknote className="w-4 h-4 text-emerald-400" />
+            <span className="hidden sm:inline">Ingreso</span>
           </button>
 
           {/* Add Expense Button */}
