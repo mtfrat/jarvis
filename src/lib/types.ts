@@ -33,6 +33,8 @@ export interface Expense {
   amount: number;
   currency: Currency;
   amount_ars: number;
+  discount_amount: number;
+  discount_ars: number;
   exchange_rate: number | null;
   description: string;
   category: ExpenseCategory | string;
@@ -55,6 +57,7 @@ export interface AIExpenseExtraction {
   payment_method: PaymentMethod;
   installments_total: number;
   date?: string; // YYYY-MM-DD
+  original_amount?: number;
   roast_comment?: string;
   items?: Array<{ name: string; price?: number }>;
 }
@@ -92,6 +95,7 @@ export interface DashboardStats {
   totalIncomeArs: number;
   recurringIncomeArs: number;
   balanceArs: number;
+  totalDiscountArs: number;
   budgetsExceeded: string[];
   exchangeRate: number;
   isCurrentMonth: boolean;

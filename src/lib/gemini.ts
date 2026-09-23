@@ -39,6 +39,10 @@ const extractionJsonSchema = {
       type: 'string',
       description: 'Fecha del gasto en formato YYYY-MM-DD. Si no se indica fecha pasada, usar la fecha de hoy.',
     },
+    original_amount: {
+      type: 'number',
+      description: 'Precio original ANTES de descuentos/cupones/promos. Solo si hubo descuento; si no lo hay, omitir este campo.',
+    },
     roast_comment: {
       type: 'string',
       description: 'Comentario breve (1-2 oraciones) ingenioso y con personalidad: sutil humor/roast si es gasto prescindible o delivery, o felicitación/ánimo si es esencial o ahorro.',
@@ -78,7 +82,10 @@ Reglas de interpretación:
    ${PAYMENT_METHODS.join(', ')}.
 5. Roast / Personalidad:
    - Si es gasto esencial (Supermercado, Medicamentos, Servicios del hogar): sé positivo y práctico.
-   - Si es gasto discrecional o compras online: haz un comentario irónico y gracioso pero simpático sobre su billetera.`;
+   - Si es gasto discrecional o compras online: haz un comentario irónico y gracioso pero simpático sobre su billetera.
+6. Descuentos:
+   - Si el ticket, mensaje o captura muestra precio original y precio final con descuento, cupón o promoción: amount = precio final pagado, original_amount = precio original antes del descuento.
+   - Si no hay descuento, omití original_amount.`;
 }
 
 async function callGeminiWithFallback(contents: any): Promise<AIExpenseExtraction> {
@@ -148,7 +155,7 @@ export async function parseExpenseFromImage(imageBuffer: Buffer, mimeType: strin
         mimeType: mimeType,
       },
     },
-    'Analiza esta foto de ticket, comprobante o captura de pantalla de compra (ej: Mercado Libre, Amazon, ticket fiscal). Extrae el producto o comercio, monto total final pagado, fecha (formato YYYY-MM-DD), método de pago y categoría adecuada.',
+    'Analiza esta foto de ticket, comprobante o captura de pantalla de compra (ej: Mercado Libre, Amazon, ticket fiscal). Extrae el producto o comercio, monto total final pagado, precio original si hubo descuento/cupón, fecha (formato YYYY-MM-DD), método de pago y categoría adecuada.',
   ];
   return callGeminiWithFallback(contents);
 }

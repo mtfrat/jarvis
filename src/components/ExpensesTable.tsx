@@ -53,6 +53,8 @@ export function ExpensesTable({
       'monto',
       'moneda',
       'monto_ars',
+      'descuento',
+      'descuento_ars',
       'fuente',
     ];
     const rows = filtered.map((e) =>
@@ -65,6 +67,8 @@ export function ExpensesTable({
         e.amount,
         e.currency,
         e.amount_ars,
+        e.discount_amount ?? 0,
+        e.discount_ars ?? 0,
         e.source,
       ]
         .map(esc)
@@ -216,7 +220,12 @@ export function ExpensesTable({
                     )}
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-white whitespace-nowrap">
-                    {formatMoney(Number(item.amount_ars), item.currency, Number(item.amount))}
+                    <div>{formatMoney(Number(item.amount_ars), item.currency, Number(item.amount))}</div>
+                    {Number(item.discount_amount) > 0 && (
+                      <div className="text-[10px] text-emerald-400 font-medium">
+                        ahorro {formatMoney(Number(item.discount_ars), 'ARS', Number(item.discount_amount))}
+                      </div>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-center">
                     <button

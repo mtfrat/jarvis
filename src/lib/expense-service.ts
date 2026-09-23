@@ -11,6 +11,7 @@ export interface CreateExpenseParams {
   payment_method?: string;
   installments_total?: number;
   date?: string; // YYYY-MM-DD
+  discount_amount?: number;
   user_telegram_id?: number | null;
   user_name?: string | null;
   source?: 'telegram_text' | 'telegram_voice' | 'telegram_receipt' | 'dashboard_manual';
@@ -45,14 +46,27 @@ export async function createExpense(params: CreateExpenseParams): Promise<Expens
 
   const { amountArs, exchangeRate } = await normalizeToArs(params.amount, params.currency);
 
+  const discountAmount = params.discount_amount && params.discount_amount > 0
+    ? Math.round(params.discount_amount * 100) / 100
+    : 0;
+  const discountArs = discountAmount > 0
+    ? (params.currency === 'USD'
+      ? Math.round(discountAmount * (exchangeRate || 0) * 100) / 100
+      : discountAmount)
+    : 0;
+
   const installmentGroupId = installmentsTotal > 1 ? crypto.randomUUID() : null;
   const recordsToInsert: Array<Record<string, unknown>> = [];
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const baseAmount = round2(params.amount / installmentsTotal);
   const baseAmountArs = round2(amountArs / installmentsTotal);
+  const baseDiscount = round2(discountAmount / installmentsTotal);
+  const baseDiscountArs = round2(discountArs / installmentsTotal);
   let allocatedAmount = 0;
   let allocatedArs = 0;
+  let allocatedDiscount = 0;
+  let allocatedDiscountArs = 0;
 
   for (let i = 1; i <= installmentsTotal; i++) {
     const installmentDate = addMonths(baseDate, i - 1);
@@ -60,8 +74,12 @@ export async function createExpense(params: CreateExpenseParams): Promise<Expens
     const isLast = i === installmentsTotal;
     const installmentAmount = isLast ? round2(params.amount - allocatedAmount) : baseAmount;
     const installmentArs = isLast ? round2(amountArs - allocatedArs) : baseAmountArs;
+    const installmentDiscount = isLast ? round2(discountAmount - allocatedDiscount) : baseDiscount;
+    const installmentDiscountArs = isLast ? round2(discountArs - allocatedDiscountArs) : baseDiscountArs;
     allocatedAmount += installmentAmount;
     allocatedArs += installmentArs;
+    allocatedDiscount += installmentDiscount;
+    allocatedDiscountArs += installmentDiscountArs;
 
     const desc = installmentsTotal > 1
       ? `${params.description} (Cuota ${i}/${installmentsTotal})`
@@ -72,6 +90,8 @@ export async function createExpense(params: CreateExpenseParams): Promise<Expens
       amount: installmentAmount,
       currency: params.currency,
       amount_ars: installmentArs,
+      discount_amount: installmentDiscount,
+      discount_ars: installmentDiscountArs,
       exchange_rate: exchangeRate,
       description: desc,
       category,
@@ -142,6 +162,183 @@ export async function deleteInstallmentGroup(groupId: string): Promise<boolean> 
   return !error;
 }
 
+export async function getExpenseByPrefix(prefix: string): Promise<Expense | null> {
+  if (!isSupabaseConfigured) return null;
+  const clean = (prefix || '').trim().toLowerCase();
+  if (!clean) return null;
+
+  // Full UUID → eq (LIKE no existe sobre tipo uuid en Postgres)
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(clean)) {
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .select('*')
+      .eq('id', clean)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data as Expense;
+  }
+
+  // First segment (8 hex chars, como muestra /gastos) → range sobre uuid
+  if (/^[0-9a-f]{8}$/.test(clean)) {
+    const lower = `${clean}-0000-0000-0000-000000000000`;
+    const upper = `${clean}-ffff-ffff-ffff-ffffffffffff`;
+    const { data, error } = await supabaseAdmin
+      .from('expenses')
+      .select('*')
+      .gte('id', lower)
+      .lte('id', upper)
+      .limit(2);
+    if (error || !data || data.length === 0) return null;
+    if (data.length > 1) return null;
+    return data[0] as Expense;
+  }
+
+  // Fallback: prefijos de otro largo → scan de ids
+  const { data, error } = await supabaseAdmin.from('expenses').select('id').limit(10000);
+  if (error || !data) return null;
+  const matches = data.filter((r) => String(r.id).toLowerCase().startsWith(clean));
+  if (matches.length !== 1) return null;
+  const { data: full } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('id', matches[0].id)
+    .maybeSingle();
+  if (!full) return null;
+  return full as Expense;
+}
+
+export interface UpdateExpenseFields {
+  amount?: number;
+  description?: string;
+  category?: string;
+  payment_method?: string;
+  date?: string;
+}
+
+export async function updateExpense(id: string, fields: UpdateExpenseFields): Promise<Expense> {
+  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
+  const { data: found, error: findError } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (findError || !found) throw new Error('Gasto no encontrado');
+  const exp = found as Expense;
+  const groupId = exp.installment_group_id;
+  const isGroup = Boolean(groupId);
+
+  if (fields.amount !== undefined && isGroup) {
+    throw new Error('No podés cambiar el monto de un gasto en cuotas — borralo con /borrar y recrealo.');
+  }
+  if (fields.date !== undefined && isGroup) {
+    throw new Error('No podés cambiar la fecha de un gasto en cuotas — borralo con /borrar y recrealo.');
+  }
+
+  const patch: Record<string, unknown> = {};
+
+  if (fields.amount !== undefined) {
+    if (!Number.isFinite(fields.amount) || fields.amount <= 0) {
+      throw new Error('Monto inválido: debe ser un número mayor a 0.');
+    }
+    const rounded = Math.round(fields.amount * 100) / 100;
+    patch.amount = rounded;
+    if (exp.currency === 'USD') {
+      const rate = await getUsdExchangeRate();
+      patch.amount_ars = Math.round(rounded * rate * 100) / 100;
+      patch.exchange_rate = rate;
+    } else {
+      patch.amount_ars = rounded;
+    }
+  }
+
+  if (fields.date !== undefined) {
+    const d = fields.date.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(new Date(`${d}T12:00:00Z`).getTime())) {
+      throw new Error('Fecha inválida: usá el formato YYYY-MM-DD.');
+    }
+    patch.date = d;
+  }
+
+  if (fields.description !== undefined) {
+    const desc = fields.description.trim();
+    if (!desc) throw new Error('La descripción no puede estar vacía.');
+    if (isGroup) {
+      const { data: groupRows } = await supabaseAdmin
+        .from('expenses')
+        .select('id, installment_number, installments_total')
+        .eq('installment_group_id', groupId);
+      for (const row of groupRows || []) {
+        await supabaseAdmin
+          .from('expenses')
+          .update({ description: `${desc} (Cuota ${row.installment_number}/${row.installments_total})` })
+          .eq('id', row.id);
+      }
+    } else {
+      patch.description = desc;
+    }
+  }
+
+  if (fields.category !== undefined) {
+    if (!(EXPENSE_CATEGORIES as readonly string[]).includes(fields.category)) {
+      throw new Error(`Categoría inválida. Opciones: ${EXPENSE_CATEGORIES.join(', ')}`);
+    }
+    patch.category = fields.category;
+  }
+
+  if (fields.payment_method !== undefined) {
+    if (!(PAYMENT_METHODS as readonly string[]).includes(fields.payment_method)) {
+      throw new Error(`Método de pago inválido. Opciones: ${PAYMENT_METHODS.join(', ')}`);
+    }
+    patch.payment_method = fields.payment_method;
+  }
+
+  if (Object.keys(patch).length > 0) {
+    let query = supabaseAdmin.from('expenses').update(patch);
+    query = isGroup ? query.eq('installment_group_id', groupId) : query.eq('id', id);
+    const { error } = await query;
+    if (error) throw new Error(`No pude actualizar el gasto: ${error.message}`);
+  }
+
+  const { data: updated } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  return updated as Expense;
+}
+
+export async function setExpenseDiscount(id: string, discountAmount: number): Promise<Expense> {
+  if (!isSupabaseConfigured) throw new Error('Supabase not configured');
+  if (!Number.isFinite(discountAmount) || discountAmount < 0) {
+    throw new Error('Descuento inválido: debe ser un número mayor o igual a 0.');
+  }
+  const { data: found, error: findError } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (findError || !found) throw new Error('Gasto no encontrado');
+  const exp = found as Expense;
+  if (exp.installments_total > 1) {
+    throw new Error('No podés poner descuento manual en un gasto en cuotas.');
+  }
+  const rounded = Math.round(discountAmount * 100) / 100;
+  const discountArs = exp.currency === 'USD'
+    ? Math.round(rounded * (await getUsdExchangeRate()) * 100) / 100
+    : rounded;
+  const { error } = await supabaseAdmin
+    .from('expenses')
+    .update({ discount_amount: rounded, discount_ars: discountArs })
+    .eq('id', id);
+  if (error) throw new Error(`No pude guardar el descuento: ${error.message}`);
+  const { data: updated } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  return updated as Expense;
+}
+
 export async function getDashboardStats(selectedMonth?: string): Promise<DashboardStats> {
   const now = new Date();
   const targetDate = selectedMonth
@@ -165,6 +362,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
       totalIncomeArs: 0,
       recurringIncomeArs: 0,
       balanceArs: 0,
+      totalDiscountArs: 0,
       budgetsExceeded: [],
       exchangeRate: await getUsdExchangeRate(),
       isCurrentMonth,
@@ -213,6 +411,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
 
   // 3. Totals
   const totalSpentArs = currentExpenses.reduce((sum, e) => sum + Number(e.amount_ars), 0);
+  const totalDiscountArs = currentExpenses.reduce((sum, e) => sum + Number(e.discount_ars || 0), 0);
   const currentRate = await getUsdExchangeRate();
   const totalSpentUsd = Math.round((totalSpentArs / currentRate) * 100) / 100;
 
@@ -469,6 +668,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     totalIncomeArs,
     recurringIncomeArs,
     balanceArs,
+    totalDiscountArs,
     budgetsExceeded,
     exchangeRate: currentRate,
     isCurrentMonth,

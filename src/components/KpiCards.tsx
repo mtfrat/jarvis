@@ -57,6 +57,11 @@ export function KpiCards({ stats, currency, exchangeRate }: KpiCardsProps) {
           ) : (
             <span className="text-zinc-500">Primer mes registrado</span>
           )}
+          {stats.totalDiscountArs > 0 && (
+            <span className="inline-flex items-center gap-1 font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
+              💸 Ahorraste {formatMoney(stats.totalDiscountArs)}
+            </span>
+          )}
         </div>
       </div>
 
