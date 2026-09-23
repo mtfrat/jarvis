@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getExpenses, createExpense, deleteExpense, deleteInstallmentGroup } from '@/lib/expense-service';
+import {
+  getExpenses,
+  createExpense,
+  deleteExpense,
+  deleteInstallmentGroup,
+  updateExpense,
+  setExpenseDiscount,
+  UpdateExpenseFields,
+} from '@/lib/expense-service';
 import { requireDashboardAuth } from '@/lib/api-auth';
 
 export const dynamic = 'force-dynamic';
@@ -45,6 +53,38 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Error in POST /api/expenses:', error);
     return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const authError = requireDashboardAuth(request);
+    if (authError) return authError;
+
+    const body = await request.json();
+    if (!body.id) {
+      return NextResponse.json({ error: 'ID es requerido' }, { status: 400 });
+    }
+
+    const fields: UpdateExpenseFields = {};
+    if (body.description !== undefined) fields.description = String(body.description);
+    if (body.category !== undefined) fields.category = String(body.category);
+    if (body.payment_method !== undefined) fields.payment_method = String(body.payment_method);
+    if (body.date !== undefined) fields.date = String(body.date);
+    if (body.amount !== undefined) fields.amount = Number(body.amount);
+
+    const id = String(body.id);
+    const updated = await updateExpense(id, fields);
+
+    if (body.discount_amount !== undefined) {
+      await setExpenseDiscount(id, Number(body.discount_amount));
+    }
+
+    return NextResponse.json(updated);
+  } catch (error) {
+    console.error('Error in PATCH /api/expenses:', error);
+    const message = error instanceof Error ? error.message : 'Failed to update expense';
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }
 

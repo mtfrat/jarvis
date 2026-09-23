@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Trash2, Mic, Receipt, MessageSquare, Laptop, Filter, Download } from 'lucide-react';
+import { Search, Trash2, Pencil, Mic, Receipt, MessageSquare, Laptop, Filter, Download } from 'lucide-react';
 import { Expense, EXPENSE_CATEGORIES } from '@/lib/types';
 
 interface ExpensesTableProps {
@@ -9,6 +9,7 @@ interface ExpensesTableProps {
   currency: 'ARS' | 'USD';
   exchangeRate: number;
   onDeleteExpense: (expense: Expense) => void;
+  onEditExpense: (expense: Expense) => void;
 }
 
 export function ExpensesTable({
@@ -16,6 +17,7 @@ export function ExpensesTable({
   currency,
   exchangeRate,
   onDeleteExpense,
+  onEditExpense,
 }: ExpensesTableProps) {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -228,13 +230,22 @@ export function ExpensesTable({
                     )}
                   </td>
                   <td className="py-3 px-4 text-center">
-                    <button
-                      onClick={() => onDeleteExpense(item)}
-                      className="p-1.5 rounded-md text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition opacity-60 group-hover:opacity-100 cursor-pointer"
-                      title={item.installment_group_id ? 'Eliminar todas las cuotas' : 'Eliminar gasto'}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center justify-center gap-1">
+                      <button
+                        onClick={() => onEditExpense(item)}
+                        className="p-1.5 rounded-md text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition opacity-60 group-hover:opacity-100 cursor-pointer"
+                        title={item.installment_group_id ? 'Editar (aplica a todas las cuotas)' : 'Editar gasto'}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => onDeleteExpense(item)}
+                        className="p-1.5 rounded-md text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition opacity-60 group-hover:opacity-100 cursor-pointer"
+                        title={item.installment_group_id ? 'Eliminar todas las cuotas' : 'Eliminar gasto'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))

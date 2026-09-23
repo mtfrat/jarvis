@@ -6,6 +6,7 @@ import { KpiCards } from '@/components/KpiCards';
 import { ChartsSection } from '@/components/ChartsSection';
 import { ExpensesTable } from '@/components/ExpensesTable';
 import { NewExpenseModal } from '@/components/NewExpenseModal';
+import { EditExpenseModal } from '@/components/EditExpenseModal';
 import { NewIncomeModal } from '@/components/NewIncomeModal';
 import { BudgetPanel } from '@/components/BudgetPanel';
 import { DashboardStats, Expense } from '@/lib/types';
@@ -25,6 +26,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isIncomeModalOpen, setIsIncomeModalOpen] = useState<boolean>(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -144,6 +146,7 @@ export default function DashboardPage() {
               currency={currency}
               exchangeRate={exchangeRate}
               onDeleteExpense={handleDeleteExpense}
+              onEditExpense={setEditingExpense}
             />
           </>
         )}
@@ -154,6 +157,13 @@ export default function DashboardPage() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onExpenseAdded={fetchData}
+      />
+
+      {/* Edit Expense Modal */}
+      <EditExpenseModal
+        expense={editingExpense}
+        onClose={() => setEditingExpense(null)}
+        onExpenseUpdated={fetchData}
       />
 
       {/* New Income Modal */}
