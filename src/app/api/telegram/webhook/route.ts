@@ -52,6 +52,9 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
+      if (!bot.isInited()) {
+        await bot.init();
+      }
       await bot.handleUpdate(update);
     } catch (error) {
       console.error('Error handling Telegram update:', error);
