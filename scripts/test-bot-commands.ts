@@ -3,6 +3,7 @@ import { sent, installTelegramMock, commandEntities } from './mock-telegram-fetc
 import assert from 'node:assert/strict';
 import { bot } from '../src/bot/bot';
 import { createExpense, getExpenses, getExpenseByPrefix, deleteExpense, deleteInstallmentGroup } from '../src/lib/expense-service';
+import { getCardPaymentDay, setCardPaymentDay, deleteSetting, CARD_PAYMENT_DAY_KEY } from '../src/lib/settings-service';
 import { isSupabaseConfigured } from '../src/lib/supabase';
 import type { Update } from 'grammy/types';
 
@@ -67,7 +68,7 @@ async function run() {
     // 1. /start shows new help commands
     await handle(makeTextUpdate('/start', 1));
     const startMsg = lastText();
-    for (const cmd of ['/gastos', '/editar', '/borrar', '/descuento', '/dashboard']) {
+    for (const cmd of ['/gastos', '/editar', '/borrar', '/descuento', '/dashboard', '/config']) {
       assert.ok(startMsg.includes(cmd), `/start debe mencionar ${cmd}`);
     }
     console.log('✅1 /start lista los comandos nuevos');
@@ -231,7 +232,54 @@ async function run() {
     assert.match(lastText(), /Uso:.*descuento/s, 'usage descuento');
     console.log('✅13 /descuento usage');
 
-    // 14. Whitelist: unknown user rejected
+    // 14. /config: mostrar, setear, invalidar, off (requiere migración 06)
+    const savedDay = await getCardPaymentDay();
+    let settingsReady = true;
+    try {
+      await setCardPaymentDay(savedDay ?? 15);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/06_settings|migración|settings.*schema cache|could not find the table.*settings/i.test(msg)) {
+        settingsReady = false;
+      } else {
+        throw err;
+      }
+    }
+    if (!settingsReady) {
+      console.log('⏭️14 /config omitido: migración 06_settings.sql no ejecutada');
+    } else {
+      try {
+        sent.length = 0;
+        await handle(makeTextUpdate('/config', 30));
+        assert.match(lastText(), /Configuración actual/, '/config muestra estado');
+        assert.match(lastText(), /pagotarjeta/, '/config muestra uso');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config pagotarjeta 20', 31));
+        assert.match(lastText(), /día 20/, 'confirma día 20');
+        assert.equal(await getCardPaymentDay(), 20, 'día20 persistido');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config pagotarjeta 99', 32));
+        assert.match(lastText(), /1-31/, 'día99 rechazado');
+        assert.equal(await getCardPaymentDay(), 20, 'día sigue 20 tras rechazo');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config clave rara', 33));
+        assert.match(lastText(), /Clave desconocida/, 'clave desconocida');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config pagotarjeta off', 34));
+        assert.match(lastText(), /desactivado/, 'off desactiva');
+        assert.equal(await getCardPaymentDay(), null, 'día borrado');
+        console.log('✅14 /config: show, set, validación, off');
+      } finally {
+        if (savedDay !== null) await setCardPaymentDay(savedDay);
+        else await deleteSetting(CARD_PAYMENT_DAY_KEY);
+      }
+    }
+
+    // 15. Whitelist: unknown user rejected
     sent.length = 0;
     const rogue: Update = {
       update_id: 999,
@@ -246,7 +294,7 @@ async function run() {
     };
     await handle(rogue);
     assert.match(lastText(), /no autorizado/, 'whitelist rechaza');
-    console.log('✅14 whitelist sigue activa en comandos nuevos');
+    console.log('✅15 whitelist sigue activa en comandos nuevos');
 
     console.log('\n🎉 Todos los tests de bot pasaron.');
   } finally {

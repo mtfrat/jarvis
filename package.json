@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/test-installments.ts && tsx scripts/test-validation.ts",
     "test:discounts": "tsx scripts/test-discounts.ts",
+    "test:payment-day": "tsx scripts/test-payment-day.ts",
     "test:bot": "tsx scripts/test-bot-commands.ts",
     "test:gemini": "tsx scripts/test-gemini-discount.ts",
     "bot:dev": "tsx src/bot/dev-poller.ts"

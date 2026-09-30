@@ -19,6 +19,7 @@ export const PAYMENT_METHODS = [
   'Efectivo',
   'Tarjeta Débito',
   'Tarjeta Crédito',
+  'Cuenta DNI',
   'Mercado Pago',
   'Transferencia',
   'Otro',
@@ -29,7 +30,8 @@ export type PaymentMethod = typeof PAYMENT_METHODS[number];
 export interface Expense {
   id: string;
   created_at: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (fecha de compra en BD)
+  effective_date?: string; // fecha de figura en el dashboard (día de pago de tarjeta); solo en lectura
   amount: number;
   currency: Currency;
   amount_ars: number;

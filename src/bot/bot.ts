@@ -11,6 +11,14 @@ import {
   deleteInstallmentGroup,
 } from '../lib/expense-service';
 import { isSupabaseConfigured } from '../lib/supabase';
+import {
+  getCardPaymentDay,
+  setCardPaymentDay,
+  getReminderChatId,
+  setReminderChatId,
+  deleteSetting,
+  CARD_PAYMENT_DAY_KEY,
+} from '../lib/settings-service';
 import { format } from 'date-fns';
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN || 'placeholder_bot_token';
@@ -77,6 +85,7 @@ bot.command('start', async (ctx) => {
     `✏️ *Corregir:* _/editar 2aee2d45 monto 15000_ (campos: monto, desc, cat, pago, fecha)\n` +
     `🗑️ *Borrar:* _/borrar 2aee2d45_ — con confirmación.\n` +
     `🏷️ *Descuento:* _/descuento 2aee2d45 2000_ — registrá lo que ahorraste.\n` +
+    `⚙️ *Config:* _/config_ — día de pago de la tarjeta y recordatorios.\n` +
     `📈 *Dashboard:* _/dashboard_ — botón al panel web.\n\n` +
     `Tu Telegram ID es: \`${ctx.from?.id}\``;
 
@@ -445,6 +454,89 @@ bot.command('descuento', async (ctx) => {
   } catch (error) {
     console.error('Error setting discount:', error);
     await ctx.reply(`❌ ${error instanceof Error ? error.message : 'No pude registrar el descuento.'}`);
+  }
+});
+
+// Command: /config — día de pago de tarjeta y recordatorio
+bot.command('config', async (ctx) => {
+  if (!isSupabaseConfigured) {
+    await ctx.reply(
+      '⚠️ *Base de datos no configurada*\n\nCompletá `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en `.env.local`.',
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+
+  const args = String(ctx.match ?? '').trim().split(/\s+/).filter(Boolean);
+
+  try {
+    // Guardar este chat como destino del recordatorio (siempre que se use /config)
+    if (ctx.chat?.id) {
+      await setReminderChatId(ctx.chat.id);
+    }
+
+    if (args.length === 0) {
+      const day = await getCardPaymentDay();
+      const lines = [
+        '⚙️ *Configuración actual*',
+        day
+          ? `💳 *Día de pago de tarjeta:* día ${day} de cada mes`
+          : '💳 *Día de pago de tarjeta:* sin configurar',
+        '',
+        '*Cambiar:*',
+        '/config pagotarjeta 15 — día del mes (1-31)',
+        '/config pagotarjeta off — desactivar',
+        '',
+        day
+          ? `🔔 Te aviso el día ${day} a las 14hs con el total del mes anterior.`
+          : '🔔 El recordatorio está desactivado hasta que configures el día.',
+        ctx.chat?.id ? `_Chat de recordatorio:_ \`${ctx.chat.id}\`` : '',
+      ].filter(Boolean);
+      await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+      return;
+    }
+
+    const [key, ...rest] = args;
+    const field = key.toLowerCase();
+
+    if (field === 'pagotarjeta' || field === 'pago-tarjeta' || field === 'tarjeta') {
+      const value = (rest[0] || '').toLowerCase();
+
+      if (value === 'off' || value === 'none' || value === 'off.' || value === 'desactivar') {
+        await deleteSetting(CARD_PAYMENT_DAY_KEY);
+        await ctx.reply(
+          '💳 Día de pago de tarjeta *desactivado*.\nLos gastos con tarjeta figuran en el mes de compra.',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 1 || n > 31) {
+        await ctx.reply(
+          '✏️ *Uso:* `/config pagotarjeta <1-31>` o `/config pagotarjeta off`\nEj: `/config pagotarjeta 15`',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      await setCardPaymentDay(n);
+      await ctx.reply(
+        `✅ *Día de pago configurado:* día ${n} de cada mes\n\n` +
+          `💳 Los gastos con *Tarjeta Crédito* del mes anterior figuran el día ${n} en tu dashboard.\n` +
+          `🔔 Te voy a avisar el día ${n} a las 14hs con el total a pagar.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    await ctx.reply(
+      '🔑 Clave desconocida. Opciones disponibles: `pagotarjeta`\nUsá `/config` para ver la ayuda.',
+      { parse_mode: 'Markdown' }
+    );
+  } catch (error) {
+    console.error('Error in /config:', error);
+    await ctx.reply(`❌ ${error instanceof Error ? error.message : 'No pude guardar la configuración.'}`);
   }
 });
 

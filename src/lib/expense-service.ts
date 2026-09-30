@@ -1,7 +1,51 @@
 import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 import { normalizeToArs, getUsdExchangeRate } from './currency';
+import { getCardPaymentDay, CARD_METHOD } from './settings-service';
 import { Expense, DashboardStats, EXPENSE_CATEGORIES, PAYMENT_METHODS } from './types';
 import { addMonths, format, startOfMonth, endOfMonth, subMonths, eachDayOfInterval, differenceInCalendarDays } from 'date-fns';
+
+/** Fecha efectiva: compra en mes P → día de pago de P+1 (clampado al fin del mes). */
+export function effectiveCardDate(purchaseDate: string, paymentDay: number): string {
+  const [y, m] = purchaseDate.split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  const day = Math.min(paymentDay, lastDay);
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function prevMonthKey(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+/**
+ * Filtra/mapea las filas (ya fetcheadas en [mes-1, mes]) al mes visible `month`.
+ * - paymentDay null → solo filas con date en month (comportamiento legacy).
+ * - paymentDay set → no-tarjeta de month + tarjeta de month-1 con effective_date = día de pago de month.
+ *   La tarjeta de month NO se muestra (pertenece a month+1). Ordena por fecha visible desc.
+ */
+export function applyEffectiveDates<T extends { date: string; payment_method?: string }>(
+  rows: readonly T[],
+  month: string,
+  paymentDay: number | null
+): Array<T & { effective_date?: string }> {
+  const prev = prevMonthKey(month);
+  const out: Array<T & { effective_date?: string }> = [];
+  for (const r of rows) {
+    const rowMonth = r.date.slice(0, 7);
+    const isCard = r.payment_method === CARD_METHOD;
+    if (paymentDay && isCard) {
+      if (rowMonth === prev) {
+        out.push({ ...r, effective_date: effectiveCardDate(r.date, paymentDay) });
+      }
+    } else if (rowMonth === month) {
+      out.push(r);
+    }
+  }
+  out.sort((a, b) => (b.effective_date || b.date).localeCompare(a.effective_date || a.date));
+  return out;
+}
 
 export interface CreateExpenseParams {
   amount: number;
@@ -129,16 +173,24 @@ export async function getExpenses(options?: {
 }): Promise<Expense[]> {
   if (!isSupabaseConfigured) return [];
 
-  let query = supabaseAdmin.from('expenses').select('*').order('date', { ascending: false });
+  let query = supabaseAdmin.from('expenses').select('*');
 
   if (options?.month) {
     const [year, month] = options.month.split('-').map(Number);
-    const start = format(startOfMonth(new Date(year, month - 1)), 'yyyy-MM-dd');
-    const end = format(endOfMonth(new Date(year, month - 1)), 'yyyy-MM-dd');
-    query = query.gte('date', start).lte('date', end);
+    const target = new Date(year, month - 1, 1);
+    const paymentDay = await getCardPaymentDay();
+    // Con día de pago hay que traer también el mes anterior (la tarjeta de M-1 se ve en M)
+    const start = format(startOfMonth(paymentDay ? subMonths(target, 1) : target), 'yyyy-MM-dd');
+    const end = format(endOfMonth(target), 'yyyy-MM-dd');
+    const { data, error } = await query.gte('date', start).lte('date', end);
+    if (error) {
+      console.error('Error fetching expenses:', error);
+      return [];
+    }
+    return applyEffectiveDates((data || []) as Expense[], options.month, paymentDay);
   }
 
-  const { data, error } = await query;
+  const { data, error } = await query.order('date', { ascending: false });
   if (error) {
     console.error('Error fetching expenses:', error);
     return [];
@@ -354,6 +406,10 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
 
   const isCurrentMonth = format(targetDate, 'yyyy-MM') === format(now, 'yyyy-MM');
 
+  const monthKey = format(targetDate, 'yyyy-MM');
+  const prevMonthKey = format(prevMonthDate, 'yyyy-MM');
+  const paymentDay = await getCardPaymentDay();
+
   if (!isSupabaseConfigured) {
     // Return empty stats structure when database is not connected yet
     return {
@@ -390,23 +446,33 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     };
   }
 
-  // 1. Fetch current month expenses
-  const { data: currentMonthData } = await supabaseAdmin
+  // 1. Fetch window [M-2, M] when payment day set (mes visible necesita M-1; comparación prev necesita M-2), si no solo [M, M] + [M-1] aparte
+  const windowStart = paymentDay ? subMonths(targetDate, 2) : targetDate;
+  const { data: windowData } = await supabaseAdmin
     .from('expenses')
     .select('*')
-    .gte('date', currentMonthStart)
+    .gte('date', format(startOfMonth(windowStart), 'yyyy-MM-dd'))
     .lte('date', currentMonthEnd);
 
-  const currentExpenses: Expense[] = currentMonthData || [];
+  const allRows = (windowData || []) as Expense[];
+  const currentExpenses = applyEffectiveDates(allRows, monthKey, paymentDay);
 
-  // 2. Fetch previous month (for comparison and per-category deltas)
-  const { data: prevMonthData } = await supabaseAdmin
-    .from('expenses')
-    .select('date, category, amount_ars')
-    .gte('date', prevMonthStart)
-    .lte('date', prevMonthEnd);
-
-  const prevExpenses = prevMonthData || [];
+  // 2. Previous month view (para comparación y deltas por categoría)
+  let prevExpenses: Array<{ date: string; category: string; amount_ars: number }>;
+  if (paymentDay) {
+    prevExpenses = applyEffectiveDates(allRows, prevMonthKey, paymentDay).map((e) => ({
+      date: e.effective_date || e.date,
+      category: e.category,
+      amount_ars: e.amount_ars,
+    }));
+  } else {
+    const { data: prevMonthData } = await supabaseAdmin
+      .from('expenses')
+      .select('date, category, amount_ars')
+      .gte('date', prevMonthStart)
+      .lte('date', prevMonthEnd);
+    prevExpenses = prevMonthData || [];
+  }
   const prevMonthTotalArs = prevExpenses.reduce((sum, e) => sum + Number(e.amount_ars), 0);
 
   // 3. Totals
@@ -426,7 +492,6 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   const { data: recurringRows } = await supabaseAdmin
     .from('recurring_incomes')
     .select('amount, currency, created_at');
-  const monthKey = format(targetDate, 'yyyy-MM');
   const recurringIncomeArs = (recurringRows || [])
     .filter((r) => monthKey >= String(r.created_at).slice(0, 7))
     .reduce((sum, r) => {
@@ -447,7 +512,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
       return day <= cutoffDay ? sum + Number(e.amount_ars) : sum;
     }, 0);
     const currentToDate = currentExpenses.reduce((sum, e) => {
-      const day = Number(String(e.date).slice(8, 10));
+      const day = Number(String(e.effective_date || e.date).slice(8, 10));
       return day <= now.getDate() ? sum + Number(e.amount_ars) : sum;
     }, 0);
     if (prevToDate > 0) {
@@ -544,7 +609,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   }));
 
   currentExpenses.forEach((exp) => {
-    const d = new Date(`${exp.date}T12:00:00Z`);
+    const d = new Date(`${exp.effective_date || exp.date}T12:00:00Z`);
     const dayIdx = d.getDay();
     dayTotals[dayIdx].amountArs += Number(exp.amount_ars);
     dayTotals[dayIdx].count += 1;
@@ -561,8 +626,9 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
 
   const dailyMap = new Map<string, number>();
   currentExpenses.forEach((exp) => {
-    const curr = dailyMap.get(exp.date) || 0;
-    dailyMap.set(exp.date, curr + Number(exp.amount_ars));
+    const key = exp.effective_date || exp.date;
+    const curr = dailyMap.get(key) || 0;
+    dailyMap.set(key, curr + Number(exp.amount_ars));
   });
 
   const monthlyTimeline = daysInterval.map((d) => {
@@ -574,12 +640,16 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   });
 
   // 7. Future installments query (projections for coming months)
-  const futureStart = format(targetDate, 'yyyy-MM-01');
-  const futureEnd = format(addMonths(targetDate, 6), 'yyyy-MM-dd');
+  // Con día de pago: fetch desde M-1 (la tarjeta de M-1 se ve en M) y agrupar por mes efectivo
+  const futureStart = paymentDay
+    ? format(startOfMonth(subMonths(targetDate, 1)), 'yyyy-MM-dd')
+    : format(targetDate, 'yyyy-MM-01');
+  const futureEnd = format(endOfMonth(addMonths(targetDate, 6)), 'yyyy-MM-dd');
+  const futureMaxMonth = format(addMonths(targetDate, 6), 'yyyy-MM');
 
   const { data: futureData } = await supabaseAdmin
     .from('expenses')
-    .select('date, amount_ars, installments_total, installment_number')
+    .select('date, amount_ars, installments_total, installment_number, payment_method')
     .gt('installments_total', 1)
     .gte('date', futureStart)
     .lte('date', futureEnd);
@@ -588,9 +658,12 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   const futureMonthsMap = new Map<string, { amountArs: number; count: number }>();
 
   futureExpenses.forEach((f) => {
-    const monthKey = f.date.substring(0, 7); // YYYY-MM
-    const curr = futureMonthsMap.get(monthKey) || { amountArs: 0, count: 0 };
-    futureMonthsMap.set(monthKey, {
+    const isCard = Boolean(paymentDay) && f.payment_method === CARD_METHOD;
+    const effDate = isCard ? effectiveCardDate(f.date, paymentDay!) : f.date;
+    const mk = effDate.substring(0, 7); // YYYY-MM
+    if (mk < monthKey || mk > futureMaxMonth) return;
+    const curr = futureMonthsMap.get(mk) || { amountArs: 0, count: 0 };
+    futureMonthsMap.set(mk, {
       amountArs: curr.amountArs + Number(f.amount_ars),
       count: curr.count + 1,
     });

@@ -46,8 +46,10 @@ export function ExpensesTable({
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const showPurchaseDate = filtered.some((e) => e.effective_date && e.effective_date !== e.date);
     const headers = [
       'fecha',
+      ...(showPurchaseDate ? ['fecha_compra'] : []),
       'descripcion',
       'categoria',
       'metodo_pago',
@@ -61,7 +63,8 @@ export function ExpensesTable({
     ];
     const rows = filtered.map((e) =>
       [
-        e.date,
+        e.effective_date || e.date,
+        ...(showPurchaseDate ? [e.date] : []),
         e.description,
         e.category,
         e.payment_method,
@@ -193,8 +196,18 @@ export function ExpensesTable({
             {filtered.length > 0 ? (
               filtered.map((item) => (
                 <tr key={item.id} className="hover:bg-[#18181b]/40 transition group">
-                  <td className="py-3 px-4 text-zinc-400 whitespace-nowrap font-mono">
-                    {item.date}
+                  <td
+                    className="py-3 px-4 text-zinc-400 whitespace-nowrap font-mono"
+                    title={
+                      item.effective_date && item.effective_date !== item.date
+                        ? `Comprado el ${item.date} · figura el ${item.effective_date} (día de pago)`
+                        : undefined
+                    }
+                  >
+                    {item.effective_date || item.date}
+                    {item.effective_date && item.effective_date !== item.date && (
+                      <span className="block text-[10px] text-cyan-500/80">compra: {item.date}</span>
+                    )}
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
