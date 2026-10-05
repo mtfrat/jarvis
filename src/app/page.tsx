@@ -9,6 +9,7 @@ import { NewExpenseModal } from '@/components/NewExpenseModal';
 import { EditExpenseModal } from '@/components/EditExpenseModal';
 import { NewIncomeModal } from '@/components/NewIncomeModal';
 import { BudgetPanel } from '@/components/BudgetPanel';
+import { SplitPanel } from '@/components/SplitPanel';
 import { DashboardStats, Expense } from '@/lib/types';
 import { AlertCircle, RefreshCw, Terminal, ExternalLink } from 'lucide-react';
 import { dashboardHeaders } from '@/lib/api-client';
@@ -150,6 +151,8 @@ export default function DashboardPage() {
             />
           </>
         )}
+
+        <SplitPanel onExpenseAdded={fetchData} />
       </main>
 
       {/* New Expense Modal */}

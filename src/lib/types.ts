@@ -91,6 +91,48 @@ export interface Budget {
   monthly_amount: number;
 }
 
+export interface SplitMeeting {
+  id: string;
+  created_at: string;
+  name: string;
+  date: string; // YYYY-MM-DD
+  currency: Currency;
+}
+
+export interface SplitMember {
+  id: string;
+  meeting_id: string;
+  name: string;
+  position: number;
+  added_to_jarvis: boolean;
+}
+
+export interface SplitExpense {
+  id: string;
+  created_at: string;
+  meeting_id: string;
+  description: string;
+  amount: number;
+  paid_by: string; // member id
+  date: string; // YYYY-MM-DD
+}
+
+export interface SplitBalance {
+  member_id: string;
+  name: string;
+  paid: number; // en centavos
+  owed: number; // en centavos
+  net: number; // paid - owed; > 0 le deben, < 0 debe
+}
+
+export interface SplitTransfer {
+  from_id: string;
+  from_name: string;
+  to_id: string;
+  to_name: string;
+  amount: number; // en centavos
+}
+
 export interface DashboardStats {
   totalSpentArs: number;
   totalSpentUsd: number;
