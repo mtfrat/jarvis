@@ -6,6 +6,7 @@ import {
   deleteInstallmentGroup,
   updateExpense,
   setExpenseDiscount,
+  findDuplicateCandidates,
   UpdateExpenseFields,
 } from '@/lib/expense-service';
 import { requireDashboardAuth } from '@/lib/api-auth';
@@ -38,6 +39,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Monto, descripción y categoría son requeridos' }, { status: 400 });
     }
 
+    if (!body.force) {
+      try {
+        const duplicates = await findDuplicateCandidates(
+          Number(body.amount),
+          body.currency === 'USD' ? 'USD' : 'ARS'
+        );
+        if (duplicates.length > 0) {
+          return NextResponse.json(
+            { error: 'possible_duplicate', duplicates },
+            { status: 409 }
+          );
+        }
+      } catch (err) {
+        // Si la búsqueda falla, no bloquear la carga
+        console.error('Duplicate check failed:', err);
+      }
+    }
+
     const created = await createExpense({
       amount: Number(body.amount),
       currency: body.currency || 'ARS',
@@ -47,6 +66,7 @@ export async function POST(request: Request) {
       installments_total: Number(body.installments_total) || 1,
       date: body.date,
       source: 'dashboard_manual',
+      reimbursable: body.reimbursable === true,
     });
 
     return NextResponse.json(created, { status: 201 });
@@ -72,6 +92,7 @@ export async function PATCH(request: Request) {
     if (body.payment_method !== undefined) fields.payment_method = String(body.payment_method);
     if (body.date !== undefined) fields.date = String(body.date);
     if (body.amount !== undefined) fields.amount = Number(body.amount);
+    if (body.reimbursable !== undefined) fields.reimbursable = body.reimbursable === true;
 
     const id = String(body.id);
     const updated = await updateExpense(id, fields);

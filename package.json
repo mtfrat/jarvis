@@ -11,6 +11,8 @@
     "test:discounts": "tsx scripts/test-discounts.ts",
     "test:payment-day": "tsx scripts/test-payment-day.ts",
     "test:splits": "tsx scripts/test-splits.ts",
+    "test:duplicates": "tsx scripts/test-duplicates.ts",
+    "test:card": "tsx scripts/test-card.ts",
     "test:bot": "tsx scripts/test-bot-commands.ts",
     "test:gemini": "tsx scripts/test-gemini-discount.ts",
     "bot:dev": "tsx src/bot/dev-poller.ts"

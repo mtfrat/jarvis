@@ -14,15 +14,34 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import {
   getCardPaymentDay,
   setCardPaymentDay,
+  getCardClosingDay,
+  setCardClosingDay,
   getReminderChatId,
   setReminderChatId,
   deleteSetting,
   CARD_PAYMENT_DAY_KEY,
+  CARD_CLOSING_DAY_KEY,
 } from '../lib/settings-service';
 import { format } from 'date-fns';
 
 const botToken = process.env.TELEGRAM_BOT_TOKEN || 'placeholder_bot_token';
 export const bot = new Bot(botToken);
+
+// Lista de comandos que muestra Telegram al escribir "/"
+export const BOT_COMMANDS = [
+  { command: 'start', description: 'Ayuda general' },
+  { command: 'resumen', description: 'Resumen del mes' },
+  { command: 'gastos', description: 'Lista de gastos del mes' },
+  { command: 'editar', description: 'Editar un gasto' },
+  { command: 'borrar', description: 'Borrar un gasto' },
+  { command: 'descuento', description: 'Registrar un descuento' },
+  { command: 'config', description: 'Cierre y vencimiento de la tarjeta' },
+  { command: 'dashboard', description: 'Abrir el dashboard web' },
+] as const;
+
+export async function syncBotCommands(): Promise<void> {
+  await bot.api.setMyCommands([...BOT_COMMANDS]);
+}
 
 // Helper: Check if user is whitelisted
 function isUserAuthorized(userId?: number): boolean {
@@ -85,7 +104,7 @@ bot.command('start', async (ctx) => {
     `✏️ *Corregir:* _/editar 2aee2d45 monto 15000_ (campos: monto, desc, cat, pago, fecha)\n` +
     `🗑️ *Borrar:* _/borrar 2aee2d45_ — con confirmación.\n` +
     `🏷️ *Descuento:* _/descuento 2aee2d45 2000_ — registrá lo que ahorraste.\n` +
-    `⚙️ *Config:* _/config_ — día de pago de la tarjeta y recordatorios.\n` +
+    `⚙️ *Config:* _/config_ — cierre y vencimiento de la tarjeta y recordatorios.\n` +
     `📈 *Dashboard:* _/dashboard_ — botón al panel web.\n\n` +
     `Tu Telegram ID es: \`${ctx.from?.id}\``;
 
@@ -254,7 +273,7 @@ bot.command('editar', async (ctx) => {
     await ctx.reply(
       '✏️ *Uso:* `/editar <id> <campo> <valor>`\n' +
       'Campos: `monto`, `desc`, `cat`, `pago`, `fecha`\n' +
-      'Ej: `/editar 2aee2d45 monto 15000`\n' +
+      'Ej: `/editar 2aee2d45 monto 15000` · `/editar 2aee2d45 fecha 12/05/2026`\n' +
       'Los IDs están en /gastos.',
       { parse_mode: 'Markdown' }
     );
@@ -319,7 +338,11 @@ bot.command('editar', async (ctx) => {
     } else if (field === 'payment_method') {
       fields.payment_method = value;
     } else if (field === 'date') {
-      fields.date = value;
+      // Acepta dd/mm/aaaa (lo que ve el usuario) o YYYY-MM-DD
+      const br = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      fields.date = br
+        ? `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`
+        : value;
     }
 
     const updated = await updateExpense(exp.id, fields);
@@ -476,20 +499,24 @@ bot.command('config', async (ctx) => {
     }
 
     if (args.length === 0) {
-      const day = await getCardPaymentDay();
+      const [day, closing] = await Promise.all([getCardPaymentDay(), getCardClosingDay()]);
       const lines = [
         '⚙️ *Configuración actual*',
         day
-          ? `💳 *Día de pago de tarjeta:* día ${day} de cada mes`
-          : '💳 *Día de pago de tarjeta:* sin configurar',
+          ? `💳 *Vencimiento de tarjeta:* día ${day} de cada mes`
+          : '💳 *Vencimiento de tarjeta:* sin configurar',
+        closing
+          ? `📅 *Cierre de tarjeta:* día ${closing} de cada mes`
+          : '📅 *Cierre de tarjeta:* sin configurar (se usa el mes calendario)',
         '',
         '*Cambiar:*',
-        '/config pagotarjeta 15 — día del mes (1-31)',
-        '/config pagotarjeta off — desactivar',
+        '/config pagotarjeta 25 — día de vencimiento (1-31)',
+        '/config cierre 5 — día de cierre (1-31)',
+        '/config pagotarjeta off / cierre off — desactivar',
         '',
         day
-          ? `🔔 Te aviso el día ${day} a las 14hs con el total del mes anterior.`
-          : '🔔 El recordatorio está desactivado hasta que configures el día.',
+          ? `🔔 Te aviso el día ${day} a las 14hs con el total a pagar.`
+          : '🔔 El recordatorio está desactivado hasta que configures el vencimiento.',
         ctx.chat?.id ? `_Chat de recordatorio:_ \`${ctx.chat.id}\`` : '',
       ].filter(Boolean);
       await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
@@ -498,6 +525,38 @@ bot.command('config', async (ctx) => {
 
     const [key, ...rest] = args;
     const field = key.toLowerCase();
+
+    if (field === 'cierre') {
+      const value = (rest[0] || '').toLowerCase();
+
+      if (value === 'off' || value === 'none' || value === 'off.' || value === 'desactivar') {
+        await deleteSetting(CARD_CLOSING_DAY_KEY);
+        await ctx.reply(
+          '📅 Día de cierre *desactivado*.\nEl pago de tarjeta se calcula por mes calendario.',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      const n = Number(value);
+      if (!Number.isInteger(n) || n < 1 || n > 31) {
+        await ctx.reply(
+          '✏️ *Uso:* `/config cierre <1-31>` o `/config cierre off`\nEj: `/config cierre 5`',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      await setCardClosingDay(n);
+      const dueDay = await getCardPaymentDay();
+      await ctx.reply(
+        `✅ *Día de cierre configurado:* día ${n} de cada mes\n\n` +
+          `📅 Todos los gastos con *Tarjeta Crédito* hasta el día ${n} se juntan en la card *Pago de tarjeta* del dashboard.` +
+          (dueDay ? `\n🔔 Te aviso el día ${dueDay} a las 14hs con el total.` : ''),
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
 
     if (field === 'pagotarjeta' || field === 'pago-tarjeta' || field === 'tarjeta') {
       const value = (rest[0] || '').toLowerCase();
@@ -521,9 +580,10 @@ bot.command('config', async (ctx) => {
       }
 
       await setCardPaymentDay(n);
+      const closingDay = await getCardClosingDay();
       await ctx.reply(
-        `✅ *Día de pago configurado:* día ${n} de cada mes\n\n` +
-          `💳 Los gastos con *Tarjeta Crédito* del mes anterior figuran el día ${n} en tu dashboard.\n` +
+        `✅ *Vencimiento configurado:* día ${n} de cada mes\n\n` +
+          `💳 Los gastos con *Tarjeta Crédito*${closingDay ? ` hasta el día ${closingDay} (cierre)` : ' del mes anterior'} figuran en la card *Pago de tarjeta*.\n` +
           `🔔 Te voy a avisar el día ${n} a las 14hs con el total a pagar.`,
         { parse_mode: 'Markdown' }
       );
@@ -531,7 +591,7 @@ bot.command('config', async (ctx) => {
     }
 
     await ctx.reply(
-      '🔑 Clave desconocida. Opciones disponibles: `pagotarjeta`\nUsá `/config` para ver la ayuda.',
+      '🔑 Clave desconocida. Opciones disponibles: `pagotarjeta`, `cierre`\nUsá `/config` para ver la ayuda.',
       { parse_mode: 'Markdown' }
     );
   } catch (error) {

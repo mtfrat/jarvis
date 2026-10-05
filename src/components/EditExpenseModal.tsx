@@ -18,6 +18,7 @@ export function EditExpenseModal({ expense, onClose, onExpenseUpdated }: EditExp
   const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_METHODS[0]);
   const [discount, setDiscount] = useState('');
   const [date, setDate] = useState('');
+  const [reimbursable, setReimbursable] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +35,7 @@ export function EditExpenseModal({ expense, onClose, onExpenseUpdated }: EditExp
     setPaymentMethod(expense.payment_method || 'Otro');
     setDiscount(expense.discount_amount ? String(expense.discount_amount) : '');
     setDate(expense.date);
+    setReimbursable(expense.reimbursable === true);
     setError(null);
   }, [expense]);
 
@@ -67,6 +69,7 @@ export function EditExpenseModal({ expense, onClose, onExpenseUpdated }: EditExp
         body.date = date;
         body.discount_amount = discount === '' ? 0 : Number(discount);
       }
+      body.reimbursable = reimbursable;
 
       const res = await fetch('/api/expenses', {
         method: 'PATCH',
@@ -226,6 +229,22 @@ export function EditExpenseModal({ expense, onClose, onExpenseUpdated }: EditExp
               </div>
             </div>
           )}
+
+          {/* Reimbursable */}
+          <label className="flex items-start gap-2.5 p-3 rounded-lg bg-[#18181b] border border-[#27272a] cursor-pointer hover:border-sky-500/40 transition">
+            <input
+              type="checkbox"
+              checked={reimbursable}
+              onChange={(e) => setReimbursable(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-sky-500 cursor-pointer"
+            />
+            <span className="text-xs">
+              <span className="font-medium text-sky-300">100% reintegrable</span>
+              <span className="block text-zinc-500">
+                Figura en el pago de la tarjeta, pero no cuenta como gasto en tus estadísticas.
+              </span>
+            </span>
+          </label>
 
           {/* Buttons */}
           <div className="pt-2 flex items-center justify-end gap-2">

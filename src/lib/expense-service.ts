@@ -1,8 +1,8 @@
 import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 import { normalizeToArs, getUsdExchangeRate } from './currency';
-import { getCardPaymentDay, CARD_METHOD } from './settings-service';
-import { Expense, DashboardStats, EXPENSE_CATEGORIES, PAYMENT_METHODS } from './types';
-import { addMonths, format, startOfMonth, endOfMonth, subMonths, eachDayOfInterval, differenceInCalendarDays } from 'date-fns';
+import { getCardPaymentDay, getCardClosingDay, CARD_METHOD } from './settings-service';
+import { Expense, DashboardStats, CardStatement, EXPENSE_CATEGORIES, PAYMENT_METHODS } from './types';
+import { addMonths, format, startOfMonth, endOfMonth, subMonths, eachDayOfInterval, differenceInCalendarDays, subDays, min as minDate } from 'date-fns';
 
 /** Fecha efectiva: compra en mes P → día de pago de P+1 (clampado al fin del mes). */
 export function effectiveCardDate(purchaseDate: string, paymentDay: number): string {
@@ -47,6 +47,32 @@ export function applyEffectiveDates<T extends { date: string; payment_method?: s
   return out;
 }
 
+/**
+ * Candidatos a duplicado: gastos con el mismo monto y moneda dentro de la ventana
+ * [mínimo entre inicio del mes actual y hoy-30 días, hoy].
+ */
+export async function findDuplicateCandidates(
+  amount: number,
+  currency: 'ARS' | 'USD',
+  now: Date = new Date(),
+  limit = 5
+): Promise<Expense[]> {
+  const rounded = Math.round(amount * 100) / 100;
+  const windowStart = minDate([startOfMonth(now), subDays(now, 30)]);
+
+  const { data, error } = await supabaseAdmin
+    .from('expenses')
+    .select('*')
+    .eq('amount', rounded)
+    .eq('currency', currency)
+    .gte('date', format(windowStart, 'yyyy-MM-dd'))
+    .lte('date', format(now, 'yyyy-MM-dd'))
+    .order('date', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`No pude buscar duplicados: ${error.message}`);
+  return (data ?? []) as Expense[];
+}
+
 export interface CreateExpenseParams {
   amount: number;
   currency: 'ARS' | 'USD';
@@ -60,6 +86,7 @@ export interface CreateExpenseParams {
   user_name?: string | null;
   source?: 'telegram_text' | 'telegram_voice' | 'telegram_receipt' | 'dashboard_manual';
   raw_input?: string | null;
+  reimbursable?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -147,6 +174,7 @@ export async function createExpense(params: CreateExpenseParams): Promise<Expens
       user_name: params.user_name || null,
       source: params.source || 'dashboard_manual',
       raw_input: params.raw_input || null,
+      reimbursable: params.reimbursable === true,
       metadata: params.metadata || {},
     });
   }
@@ -265,6 +293,7 @@ export interface UpdateExpenseFields {
   category?: string;
   payment_method?: string;
   date?: string;
+  reimbursable?: boolean;
 }
 
 export async function updateExpense(id: string, fields: UpdateExpenseFields): Promise<Expense> {
@@ -306,7 +335,7 @@ export async function updateExpense(id: string, fields: UpdateExpenseFields): Pr
   if (fields.date !== undefined) {
     const d = fields.date.trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(new Date(`${d}T12:00:00Z`).getTime())) {
-      throw new Error('Fecha inválida: usá el formato YYYY-MM-DD.');
+      throw new Error('Fecha inválida: usá dd/mm/aaaa (ej: 12/05/2026).');
     }
     patch.date = d;
   }
@@ -342,6 +371,10 @@ export async function updateExpense(id: string, fields: UpdateExpenseFields): Pr
       throw new Error(`Método de pago inválido. Opciones: ${PAYMENT_METHODS.join(', ')}`);
     }
     patch.payment_method = fields.payment_method;
+  }
+
+  if (fields.reimbursable !== undefined) {
+    patch.reimbursable = fields.reimbursable === true;
   }
 
   if (Object.keys(patch).length > 0) {
@@ -389,6 +422,131 @@ export async function setExpenseDiscount(id: string, discountAmount: number): Pr
     .eq('id', id)
     .maybeSingle();
   return updated as Expense;
+}
+
+/** Ocurrió `day` dentro del mes de `base` (clampado al largo del mes). Todo en UTC. */
+function occurrenceInMonth(base: Date, day: number): Date {
+  const lastDay = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), Math.min(day, lastDay)));
+}
+
+/** Primera ocurrencia de `day` estrictamente después de `ref`. */
+function occurrenceAfter(ref: Date, day: number): Date {
+  const cur = occurrenceInMonth(ref, day);
+  if (cur.getTime() > ref.getTime()) return cur;
+  return occurrenceInMonth(new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 1)), day);
+}
+
+/** Última ocurrencia de `day` menor o igual a `ref`. */
+function occurrenceOnOrBefore(ref: Date, day: number): Date {
+  const cur = occurrenceInMonth(ref, day);
+  if (cur.getTime() <= ref.getTime()) return cur;
+  return occurrenceInMonth(new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), 0)), day);
+}
+
+function ymd(d: Date): string {
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${mm}-${dd}`;
+}
+
+export interface CardStatementDates {
+  status: 'due' | 'accumulating';
+  periodStart: Date;
+  periodEnd: Date;
+  dueDate: Date;
+  closingDate: Date;
+}
+
+/**
+ * Períodos del resumen "pago de tarjeta".
+ * - Con día de cierre: períodos cierre→cierre. Se muestra el resumen cerrado
+ *   mientras hoy <= vencimiento; después, el período en curso.
+ * - Sin cierre (solo día de pago): períodos por mes calendario (mes cerrado = mes anterior).
+ */
+export function computeCardStatementDates(
+  now: Date,
+  closingDay: number | null,
+  paymentDay: number
+): CardStatementDates {
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+  if (closingDay) {
+    const lastClose = occurrenceOnOrBefore(today, closingDay);
+    const dueDate = occurrenceAfter(lastClose, paymentDay);
+    if (today.getTime() <= dueDate.getTime()) {
+      const prevClose = occurrenceInMonth(new Date(Date.UTC(lastClose.getUTCFullYear(), lastClose.getUTCMonth(), 0)), closingDay);
+      return {
+        status: 'due',
+        periodStart: prevClose,
+        periodEnd: lastClose,
+        dueDate,
+        closingDate: lastClose,
+      };
+    }
+    const nextClose = occurrenceAfter(lastClose, closingDay);
+    return {
+      status: 'accumulating',
+      periodStart: lastClose,
+      periodEnd: nextClose,
+      dueDate: occurrenceAfter(nextClose, paymentDay),
+      closingDate: nextClose,
+    };
+  }
+
+  // Fallback mes calendario: cerrado = mes anterior, vence `paymentDay` de este mes
+  const thisMonthDue = occurrenceInMonth(today, paymentDay);
+  if (today.getTime() <= thisMonthDue.getTime()) {
+    const prevMonthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
+    return {
+      status: 'due',
+      periodStart: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1)),
+      periodEnd: prevMonthEnd,
+      dueDate: thisMonthDue,
+      closingDate: prevMonthEnd,
+    };
+  }
+  const monthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+  const nextMonthDue = occurrenceInMonth(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)), paymentDay);
+  return {
+    status: 'accumulating',
+    periodStart: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)),
+    periodEnd: monthEnd,
+    dueDate: nextMonthDue,
+    closingDate: monthEnd,
+  };
+}
+
+/**
+ * Resumen "Pago de tarjeta": gastos con tarjeta del período vigente
+ * (incluye reintegrables — hay que pagarlos aunque te devuelvan la plata).
+ * null si no hay día de pago configurado.
+ */
+export async function getCardStatement(now: Date = new Date()): Promise<CardStatement | null> {
+  if (!isSupabaseConfigured) return null;
+  const [paymentDay, closingDay] = await Promise.all([getCardPaymentDay(), getCardClosingDay()]);
+  if (!paymentDay) return null;
+
+  const dates = computeCardStatementDates(now, closingDay, paymentDay);
+  const { data, error } = await supabaseAdmin
+    .from('expenses')
+    .select('amount_ars')
+    .eq('payment_method', CARD_METHOD)
+    .gte('date', ymd(dates.periodStart))
+    .lte('date', ymd(dates.periodEnd));
+  if (error) {
+    console.error('Error fetching card statement:', error);
+    return null;
+  }
+
+  return {
+    status: dates.status,
+    totalArs: (data || []).reduce((sum, r) => sum + Number(r.amount_ars), 0),
+    periodStart: ymd(dates.periodStart),
+    periodEnd: ymd(dates.periodEnd),
+    dueDate: ymd(dates.dueDate),
+    closingDate: ymd(dates.closingDate),
+  };
 }
 
 export async function getDashboardStats(selectedMonth?: string): Promise<DashboardStats> {
@@ -443,6 +601,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
       monthlyTimeline: [],
       futureInstallments: [],
       subscriptions: [],
+      cardStatement: null,
     };
   }
 
@@ -454,7 +613,8 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     .gte('date', format(startOfMonth(windowStart), 'yyyy-MM-dd'))
     .lte('date', currentMonthEnd);
 
-  const allRows = (windowData || []) as Expense[];
+  // Reintegrables no cuentan como gasto: quedan fuera de totales, rachas, proyecciones y suscripciones
+  const allRows = ((windowData || []) as Expense[]).filter((r) => !r.reimbursable);
   const currentExpenses = applyEffectiveDates(allRows, monthKey, paymentDay);
 
   // 2. Previous month view (para comparación y deltas por categoría)
@@ -468,10 +628,10 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   } else {
     const { data: prevMonthData } = await supabaseAdmin
       .from('expenses')
-      .select('date, category, amount_ars')
+      .select('date, category, amount_ars, reimbursable')
       .gte('date', prevMonthStart)
       .lte('date', prevMonthEnd);
-    prevExpenses = prevMonthData || [];
+    prevExpenses = (prevMonthData || []).filter((r) => !r.reimbursable);
   }
   const prevMonthTotalArs = prevExpenses.reduce((sum, e) => sum + Number(e.amount_ars), 0);
 
@@ -533,25 +693,26 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
       ? Math.round((totalSpentArs / now.getDate()) * daysInMonth)
       : null;
 
-  // Streak: consecutive days (ending today) with no expenses
+  // Streak: consecutive days (ending today) with no expenses (los reintegrables no cuentan)
   const todayStr = format(now, 'yyyy-MM-dd');
   const { data: todayRows } = await supabaseAdmin
     .from('expenses')
-    .select('id')
+    .select('id, reimbursable')
     .eq('date', todayStr)
-    .limit(1);
+    .limit(50);
   let streakDaysWithoutSpending: number | null = null;
-  if (todayRows && todayRows.length > 0) {
+  if ((todayRows || []).some((r) => !r.reimbursable)) {
     streakDaysWithoutSpending = 0;
   } else {
     const { data: lastRows } = await supabaseAdmin
       .from('expenses')
-      .select('date')
+      .select('date, reimbursable')
       .lt('date', todayStr)
       .order('date', { ascending: false })
-      .limit(1);
-    if (lastRows && lastRows.length > 0) {
-      const [ly, lm, ld] = String(lastRows[0].date).split('-').map(Number);
+      .limit(30);
+    const lastReal = (lastRows || []).find((r) => !r.reimbursable);
+    if (lastReal) {
+      const [ly, lm, ld] = String(lastReal.date).split('-').map(Number);
       const todayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       streakDaysWithoutSpending = differenceInCalendarDays(todayLocal, new Date(ly, lm - 1, ld));
     }
@@ -649,12 +810,12 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
 
   const { data: futureData } = await supabaseAdmin
     .from('expenses')
-    .select('date, amount_ars, installments_total, installment_number, payment_method')
+    .select('date, amount_ars, installments_total, installment_number, payment_method, reimbursable')
     .gt('installments_total', 1)
     .gte('date', futureStart)
     .lte('date', futureEnd);
 
-  const futureExpenses = futureData || [];
+  const futureExpenses = (futureData || []).filter((f) => !f.reimbursable);
   const futureMonthsMap = new Map<string, { amountArs: number; count: number }>();
 
   futureExpenses.forEach((f) => {
@@ -688,7 +849,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
   const subsStart = format(subMonths(now, 5), 'yyyy-MM-01');
   const { data: recentRows } = await supabaseAdmin
     .from('expenses')
-    .select('date, description, amount_ars, installments_total')
+    .select('date, description, amount_ars, installments_total, reimbursable')
     .gte('date', subsStart)
     .lte('date', todayStr);
 
@@ -696,7 +857,7 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     string,
     { desc: string; amounts: number[]; months: Set<string>; lastDate: string }
   >();
-  (recentRows || []).forEach((r) => {
+  (recentRows || []).filter((r) => !r.reimbursable).forEach((r) => {
     if (Number(r.installments_total) > 1) return; // installment rows are not subscriptions
     const desc = String(r.description || '').trim().replace(/\s+/g, ' ');
     const key = desc.toLowerCase();
@@ -758,5 +919,6 @@ export async function getDashboardStats(selectedMonth?: string): Promise<Dashboa
     monthlyTimeline,
     futureInstallments,
     subscriptions,
+    cardStatement: await getCardStatement(now),
   };
 }

@@ -5,6 +5,7 @@ import { X, Check, Trash2, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { Income, RecurringIncome } from '@/lib/types';
 import { dashboardHeaders } from '@/lib/api-client';
+import { fmtDate } from '@/lib/format';
 
 interface NewIncomeModalProps {
   isOpen: boolean;
@@ -271,7 +272,7 @@ export function NewIncomeModal({ isOpen, onClose, onIncomeAdded, selectedMonth }
                   className="flex items-center justify-between text-xs py-1.5 group"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-zinc-500 font-mono">{inc.date}</span>
+                    <span className="text-zinc-500 font-mono">{fmtDate(inc.date)}</span>
                     <span className="text-zinc-200 truncate">{inc.description}</span>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

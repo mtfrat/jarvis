@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin, isSupabaseConfigured } from '@/lib/supabase';
-import { getCardPaymentDay, getReminderChatId, CARD_METHOD } from '@/lib/settings-service';
+import { isSupabaseConfigured } from '@/lib/supabase';
+import { getCardStatement } from '@/lib/expense-service';
+import { getCardPaymentDay, getReminderChatId } from '@/lib/settings-service';
+import { fmtDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,38 +45,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ ok: true, skipped: 'no_reminder_chat' });
     }
 
-    // Total tarjeta del mes anterior (fecha de compra original en M-1)
-    const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 };
-    const start = `${prev.y}-${String(prev.m).padStart(2, '0')}-01`;
-    const end = `${prev.y}-${String(prev.m).padStart(2, '0')}-${String(daysInMonth(prev.y, prev.m)).padStart(2, '0')}`;
-
-    const { data, error } = await supabaseAdmin
-      .from('expenses')
-      .select('amount_ars')
-      .eq('payment_method', CARD_METHOD)
-      .gte('date', start)
-      .lte('date', end);
-
-    if (error) {
-      console.error('cron card-reminder: fetch error', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Total del resumen vigente (período cierre→cierre, o mes calendario si no hay cierre)
+    const statement = await getCardStatement(new Date(Date.UTC(year, month - 1, day)));
+    if (!statement) {
+      return NextResponse.json({ error: 'Could not compute card statement' }, { status: 500 });
     }
-
-    const totalArs = (data || []).reduce((sum, r) => sum + Number(r.amount_ars), 0);
+    const totalArs = statement.totalArs;
     const fmt = (ars: number) =>
       new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(ars);
-
-    const monthName = new Date(Date.UTC(prev.y, prev.m - 1, 1)).toLocaleDateString('es-AR', {
-      month: 'long',
-      timeZone: 'UTC',
-    });
 
     const text =
       `💳 *Recordatorio: pago de tarjeta*\n\n` +
       `Hoy es día ${effectiveDay}: vence el pago de tu tarjeta.\n` +
-      `🧾 *Gastos con tarjeta de ${monthName}:* ${fmt(totalArs)}\n` +
+      `🧾 *Período ${fmtDate(statement.periodStart)} → ${fmtDate(statement.periodEnd)}:* ${fmt(totalArs)}\n` +
       (totalArs === 0
-        ? '_No hubo gastos con tarjeta ese mes._'
+        ? '_No hubo gastos con tarjeta ese período._'
         : '_Revisá tu dashboard para el detalle._');
 
     const token = process.env.TELEGRAM_BOT_TOKEN;

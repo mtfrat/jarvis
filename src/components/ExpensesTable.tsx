@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Trash2, Pencil, Mic, Receipt, MessageSquare, Laptop, Filter, Download } from 'lucide-react';
-import { Expense, EXPENSE_CATEGORIES } from '@/lib/types';
+import { Search, Trash2, Pencil, Mic, Receipt, MessageSquare, Laptop, Filter, Download, CreditCard, ArrowUp, ArrowDown } from 'lucide-react';
+import { Expense, EXPENSE_CATEGORIES, PAYMENT_METHODS } from '@/lib/types';
+import { fmtDate } from '@/lib/format';
 
 interface ExpensesTableProps {
   expenses: Expense[];
@@ -21,13 +22,30 @@ export function ExpensesTable({
 }: ExpensesTableProps) {
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedMethod, setSelectedMethod] = useState<string>('all');
+  const [amountSort, setAmountSort] = useState<'none' | 'asc' | 'desc'>('none');
 
   const filtered = expenses.filter((exp) => {
     const matchesSearch = exp.description.toLowerCase().includes(search.toLowerCase()) ||
       exp.category.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || exp.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const matchesMethod = selectedMethod === 'all' || (exp.payment_method || 'Otro') === selectedMethod;
+    return matchesSearch && matchesCategory && matchesMethod;
   });
+
+  const displayedValue = (e: Expense) => {
+    if (currency === 'USD') {
+      return e.currency === 'USD' ? Number(e.amount) : Number(e.amount_ars) / exchangeRate;
+    }
+    return Number(e.amount_ars);
+  };
+
+  const list =
+    amountSort === 'none'
+      ? filtered
+      : [...filtered].sort((a, b) =>
+          amountSort === 'asc' ? displayedValue(a) - displayedValue(b) : displayedValue(b) - displayedValue(a)
+        );
 
   const formatMoney = (amountArs: number, origCurrency: string, origAmount: number) => {
     if (currency === 'USD') {
@@ -46,7 +64,7 @@ export function ExpensesTable({
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const showPurchaseDate = filtered.some((e) => e.effective_date && e.effective_date !== e.date);
+    const showPurchaseDate = list.some((e) => e.effective_date && e.effective_date !== e.date);
     const headers = [
       'fecha',
       ...(showPurchaseDate ? ['fecha_compra'] : []),
@@ -59,12 +77,13 @@ export function ExpensesTable({
       'monto_ars',
       'descuento',
       'descuento_ars',
+      'reintegrable',
       'fuente',
     ];
-    const rows = filtered.map((e) =>
+    const rows = list.map((e) =>
       [
-        e.effective_date || e.date,
-        ...(showPurchaseDate ? [e.date] : []),
+        fmtDate(e.effective_date || e.date),
+        ...(showPurchaseDate ? [fmtDate(e.date)] : []),
         e.description,
         e.category,
         e.payment_method,
@@ -74,6 +93,7 @@ export function ExpensesTable({
         e.amount_ars,
         e.discount_amount ?? 0,
         e.discount_ars ?? 0,
+        e.reimbursable ? 'sí' : 'no',
         e.source,
       ]
         .map(esc)
@@ -165,6 +185,23 @@ export function ExpensesTable({
             </select>
           </div>
 
+          {/* Payment Method Filter */}
+          <div className="flex items-center gap-1.5 bg-[#18181b] border border-[#27272a] rounded-lg px-2.5 py-1.5 text-xs">
+            <CreditCard className="w-3.5 h-3.5 text-zinc-400" />
+            <select
+              value={selectedMethod}
+              onChange={(e) => setSelectedMethod(e.target.value)}
+              className="bg-transparent text-zinc-200 text-xs focus:outline-none cursor-pointer"
+            >
+              <option value="all" className="bg-[#18181b] text-white">Todos los métodos</option>
+              {PAYMENT_METHODS.map((pm) => (
+                <option key={pm} value={pm} className="bg-[#18181b] text-white">
+                  {pm}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Export CSV */}
           <button
             onClick={exportCsv}
@@ -188,25 +225,35 @@ export function ExpensesTable({
               <th className="py-3 px-4">Categoría</th>
               <th className="py-3 px-4">Método</th>
               <th className="py-3 px-4 text-center">Cuota</th>
-              <th className="py-3 px-4 text-right">Monto</th>
+              <th
+                className="py-3 px-4 text-right cursor-pointer select-none hover:text-zinc-200 transition"
+                onClick={() => setAmountSort(amountSort === 'none' ? 'desc' : amountSort === 'desc' ? 'asc' : 'none')}
+                title="Ordenar por monto (desc → asc → por fecha)"
+              >
+                <span className="inline-flex items-center gap-1">
+                  Monto
+                  {amountSort === 'desc' && <ArrowDown className="w-3 h-3 text-emerald-400" />}
+                  {amountSort === 'asc' && <ArrowUp className="w-3 h-3 text-emerald-400" />}
+                </span>
+              </th>
               <th className="py-3 px-4 text-center">Acción</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#27272a] text-xs">
-            {filtered.length > 0 ? (
-              filtered.map((item) => (
+            {list.length > 0 ? (
+              list.map((item) => (
                 <tr key={item.id} className="hover:bg-[#18181b]/40 transition group">
                   <td
                     className="py-3 px-4 text-zinc-400 whitespace-nowrap font-mono"
                     title={
                       item.effective_date && item.effective_date !== item.date
-                        ? `Comprado el ${item.date} · figura el ${item.effective_date} (día de pago)`
+                        ? `Comprado el ${fmtDate(item.date)} · figura el ${fmtDate(item.effective_date)} (día de pago)`
                         : undefined
                     }
                   >
-                    {item.effective_date || item.date}
+                    {fmtDate(item.effective_date || item.date)}
                     {item.effective_date && item.effective_date !== item.date && (
-                      <span className="block text-[10px] text-cyan-500/80">compra: {item.date}</span>
+                      <span className="block text-[10px] text-cyan-500/80">compra: {fmtDate(item.date)}</span>
                     )}
                   </td>
                   <td className="py-3 px-4">
@@ -215,6 +262,14 @@ export function ExpensesTable({
                       <span className="font-medium text-white group-hover:text-emerald-300 transition">
                         {item.description}
                       </span>
+                      {item.reimbursable && (
+                        <span
+                          className="inline-block px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-300 text-[9px] font-semibold border border-sky-500/30 uppercase tracking-wide shrink-0"
+                          title="100% reintegrable: cuenta en el pago de la tarjeta, no en tus estadísticas"
+                        >
+                          reintegrable
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="py-3 px-4 text-zinc-300">

@@ -1,5 +1,5 @@
 import '../load-env';
-import { bot } from './bot';
+import { bot, syncBotCommands } from './bot';
 
 async function startDevBot() {
   if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -12,6 +12,14 @@ async function startDevBot() {
   // Drop pending updates to avoid backlog
   await bot.init();
   console.log(`✅ Bot conectado como @${bot.botInfo.username}`);
+
+  try {
+    await syncBotCommands();
+    console.log('✅ Comandos registrados (se ven al escribir "/" en el chat)');
+  } catch (err) {
+    console.warn('⚠️ No pude registrar los comandos:', err instanceof Error ? err.message : err);
+  }
+
   console.log('📡 Escuchando mensajes de texto, audios y fotos de tickets...');
 
   bot.start({

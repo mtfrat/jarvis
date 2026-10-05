@@ -3,7 +3,15 @@ import { sent, installTelegramMock, commandEntities } from './mock-telegram-fetc
 import assert from 'node:assert/strict';
 import { bot } from '../src/bot/bot';
 import { createExpense, getExpenses, getExpenseByPrefix, deleteExpense, deleteInstallmentGroup } from '../src/lib/expense-service';
-import { getCardPaymentDay, setCardPaymentDay, deleteSetting, CARD_PAYMENT_DAY_KEY } from '../src/lib/settings-service';
+import {
+  getCardPaymentDay,
+  setCardPaymentDay,
+  getCardClosingDay,
+  setCardClosingDay,
+  deleteSetting,
+  CARD_PAYMENT_DAY_KEY,
+  CARD_CLOSING_DAY_KEY,
+} from '../src/lib/settings-service';
 import { isSupabaseConfigured } from '../src/lib/supabase';
 import type { Update } from 'grammy/types';
 
@@ -85,13 +93,15 @@ async function run() {
     assert.ok(String(btn.text || '').includes('Jarvis Finance'), 'texto del botón');
     console.log(`✅2 /dashboard → botón "${btn.text}" → ${btn.url}`);
 
-    // 3. Seed expense + /gastos lists short id
+    // 3. Seed expense + /gastos lists short id (fecha = hoy para que figure en /gastos)
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const [seed] = await createExpense({
       amount: 4321,
       currency: 'ARS',
       description: 'TEST BOT gasto',
       category: 'Salidas y Comida',
-      date: '2026-09-20',
+      date: today,
       source: 'dashboard_manual',
     });
     expenseIds.push(seed.id);
@@ -232,8 +242,9 @@ async function run() {
     assert.match(lastText(), /Uso:.*descuento/s, 'usage descuento');
     console.log('✅13 /descuento usage');
 
-    // 14. /config: mostrar, setear, invalidar, off (requiere migración 06)
+    // 14. /config: mostrar, setear, invalidar, cierre, off (requiere migración 06)
     const savedDay = await getCardPaymentDay();
+    const savedClosing = await getCardClosingDay();
     let settingsReady = true;
     try {
       await setCardPaymentDay(savedDay ?? 15);
@@ -253,6 +264,7 @@ async function run() {
         await handle(makeTextUpdate('/config', 30));
         assert.match(lastText(), /Configuración actual/, '/config muestra estado');
         assert.match(lastText(), /pagotarjeta/, '/config muestra uso');
+        assert.match(lastText(), /cierre/, '/config muestra cierre');
 
         sent.length = 0;
         await handle(makeTextUpdate('/config pagotarjeta 20', 31));
@@ -269,13 +281,30 @@ async function run() {
         assert.match(lastText(), /Clave desconocida/, 'clave desconocida');
 
         sent.length = 0;
+        await handle(makeTextUpdate('/config cierre 7', 35));
+        assert.match(lastText(), /día 7/, 'confirma cierre 7');
+        assert.equal(await getCardClosingDay(), 7, 'cierre7 persistido');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config cierre 0', 36));
+        assert.match(lastText(), /1-31/, 'cierre 0 rechazado');
+        assert.equal(await getCardClosingDay(), 7, 'cierre sigue 7 tras rechazo');
+
+        sent.length = 0;
+        await handle(makeTextUpdate('/config cierre off', 37));
+        assert.match(lastText(), /desactivado/, 'cierre off desactiva');
+        assert.equal(await getCardClosingDay(), null, 'cierre borrado');
+
+        sent.length = 0;
         await handle(makeTextUpdate('/config pagotarjeta off', 34));
         assert.match(lastText(), /desactivado/, 'off desactiva');
         assert.equal(await getCardPaymentDay(), null, 'día borrado');
-        console.log('✅14 /config: show, set, validación, off');
+        console.log('✅14 /config: show, set, validación, cierre, off');
       } finally {
         if (savedDay !== null) await setCardPaymentDay(savedDay);
         else await deleteSetting(CARD_PAYMENT_DAY_KEY);
+        if (savedClosing !== null) await setCardClosingDay(savedClosing);
+        else await deleteSetting(CARD_CLOSING_DAY_KEY);
       }
     }
 
@@ -301,11 +330,21 @@ async function run() {
     console.log('\n🧹 Limpiando fixtures...');
     if (groupId) await deleteInstallmentGroup(groupId);
     for (const id of expenseIds) await deleteExpense(id);
-    // remaining TEST BOT rows
-    const sept = await getExpenses({ month: '2026-09' });
-    for (const e of sept.filter((x) => x.description.startsWith('TEST BOT'))) {
-      if (e.installment_group_id) await deleteInstallmentGroup(e.installment_group_id);
-      else await deleteExpense(e.id);
+    // remaining TEST BOT rows (mes actual + meses sembrados)
+    const cleanupNow = new Date();
+    const months = new Set([
+      `${cleanupNow.getFullYear()}-${String(cleanupNow.getMonth() + 1).padStart(2, '0')}`,
+      '2026-09',
+      '2026-10',
+      '2026-11',
+    ]);
+    for (const m of months) {
+      for (const e of (await getExpenses({ month: m })).filter((x) =>
+        x.description.startsWith('TEST BOT')
+      )) {
+        if (e.installment_group_id) await deleteInstallmentGroup(e.installment_group_id);
+        else await deleteExpense(e.id);
+      }
     }
     console.log('🧹 OK.');
   }

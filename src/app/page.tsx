@@ -9,6 +9,7 @@ import { NewExpenseModal } from '@/components/NewExpenseModal';
 import { EditExpenseModal } from '@/components/EditExpenseModal';
 import { NewIncomeModal } from '@/components/NewIncomeModal';
 import { BudgetPanel } from '@/components/BudgetPanel';
+import { CardPaymentPanel } from '@/components/CardPaymentPanel';
 import { SplitPanel } from '@/components/SplitPanel';
 import { DashboardStats, Expense } from '@/lib/types';
 import { AlertCircle, RefreshCw, Terminal, ExternalLink } from 'lucide-react';
@@ -140,6 +141,7 @@ export default function DashboardPage() {
         {stats && (
           <>
             <KpiCards stats={stats} currency={currency} exchangeRate={exchangeRate} />
+            <CardPaymentPanel stats={stats} currency={currency} exchangeRate={exchangeRate} />
             <BudgetPanel stats={stats} currency={currency} exchangeRate={exchangeRate} />
             <ChartsSection stats={stats} currency={currency} exchangeRate={exchangeRate} />
             <ExpensesTable

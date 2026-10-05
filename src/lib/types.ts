@@ -48,6 +48,7 @@ export interface Expense {
   user_name: string | null;
   source: 'telegram_text' | 'telegram_voice' | 'telegram_receipt' | 'dashboard_manual';
   raw_input: string | null;
+  reimbursable?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -133,6 +134,15 @@ export interface SplitTransfer {
   amount: number; // en centavos
 }
 
+export interface CardStatement {
+  status: 'due' | 'accumulating';
+  totalArs: number;
+  periodStart: string; // YYYY-MM-DD (inicio del período, inclusive)
+  periodEnd: string; // YYYY-MM-DD (cierre del período, inclusive)
+  dueDate: string | null; // vencimiento del próximo pago (YYYY-MM-DD)
+  closingDate: string; // día de cierre del período (YYYY-MM-DD)
+}
+
 export interface DashboardStats {
   totalSpentArs: number;
   totalSpentUsd: number;
@@ -162,4 +172,5 @@ export interface DashboardStats {
   monthlyTimeline: Array<{ date: string; amountArs: number }>;
   futureInstallments: Array<{ month: string; amountArs: number; count: number }>;
   subscriptions: Array<{ description: string; amountArs: number; months: number; lastDate: string }>;
+  cardStatement: CardStatement | null;
 }

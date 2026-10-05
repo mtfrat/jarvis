@@ -1,5 +1,5 @@
 import type { Update } from 'grammy/types';
-import { bot } from '@/bot/bot';
+import { bot, syncBotCommands } from '@/bot/bot';
 import { NextResponse, after } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,19 @@ function isRedelivery(updateId: number): boolean {
   if (seenUpdates.has(updateId)) return true;
   seenUpdates.set(updateId, now);
   return false;
+}
+
+// Comandos del bot: registrar una vez por instancia (para el popup "/" de Telegram)
+let commandsSynced = false;
+
+async function ensureBotCommands() {
+  if (commandsSynced) return;
+  try {
+    await syncBotCommands();
+    commandsSynced = true;
+  } catch (err) {
+    console.warn('No pude registrar los comandos del bot:', err instanceof Error ? err.message : err);
+  }
 }
 
 export async function POST(req: Request) {
@@ -52,6 +65,7 @@ export async function POST(req: Request) {
 
   after(async () => {
     try {
+      await ensureBotCommands();
       if (!bot.isInited()) {
         await bot.init();
       }

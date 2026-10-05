@@ -8,6 +8,7 @@ import {
 } from '@/lib/types';
 import type { SplitMeetingSummary, SplitMeetingDetail } from '@/lib/split-service';
 import { dashboardHeaders } from '@/lib/api-client';
+import { fmtDate } from '@/lib/format';
 
 interface SplitPanelProps {
   onExpenseAdded: () => void;
@@ -250,6 +251,7 @@ export function SplitPanel({ onExpenseAdded }: SplitPanelProps) {
           payment_method: jarvisMethod,
           installments_total: 1,
           date: detail.meeting.date,
+          force: true,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -415,7 +417,7 @@ export function SplitPanel({ onExpenseAdded }: SplitPanelProps) {
                 <div className="min-w-0">
                   <p className="text-sm text-white font-medium truncate">{m.name}</p>
                   <p className="text-[11px] text-zinc-500">
-                    {m.date} · {m.member_count} participantes · {m.expense_count} gastos
+                    {fmtDate(m.date)} · {m.member_count} participantes · {m.expense_count} gastos
                   </p>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
@@ -470,7 +472,7 @@ export function SplitPanel({ onExpenseAdded }: SplitPanelProps) {
             </h3>
             {d && (
               <p className="text-xs text-zinc-400 mt-0.5">
-                {d.meeting.date} · Total {formatMoney(d.total, currency)} · Partes iguales entre{' '}
+                {fmtDate(d.meeting.date)} · Total {formatMoney(d.total, currency)} · Partes iguales entre{' '}
                 {d.members.length} participantes
               </p>
             )}

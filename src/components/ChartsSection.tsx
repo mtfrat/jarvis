@@ -16,6 +16,7 @@ import {
 } from 'recharts';
 import { Repeat } from 'lucide-react';
 import { DashboardStats } from '@/lib/types';
+import { fmtDate } from '@/lib/format';
 
 interface ChartsSectionProps {
   stats: DashboardStats;
@@ -311,7 +312,7 @@ export function ChartsSection({ stats, currency, exchangeRate }: ChartsSectionPr
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-zinc-500 font-mono text-[10px] hidden sm:inline">
-                    út: {sub.lastDate}
+                    út: {fmtDate(sub.lastDate)}
                   </span>
                   <span className="font-mono text-white font-semibold">
                     {formatMoney(sub.amountArs)}/mes

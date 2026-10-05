@@ -1,6 +1,7 @@
 import { supabaseAdmin, isSupabaseConfigured } from './supabase';
 
 export const CARD_PAYMENT_DAY_KEY = 'card_payment_day';
+export const CARD_CLOSING_DAY_KEY = 'card_closing_day';
 export const REMINDER_CHAT_ID_KEY = 'reminder_chat_id';
 export const CARD_METHOD = 'Tarjeta Crédito';
 
@@ -55,6 +56,21 @@ export async function setCardPaymentDay(day: number): Promise<void> {
     throw new Error('Día inválido: usá un número entre 1 y 31.');
   }
   await setSetting(CARD_PAYMENT_DAY_KEY, String(day));
+}
+
+/** Día de cierre de la tarjeta (1-31), o null si no está configurado. */
+export async function getCardClosingDay(): Promise<number | null> {
+  const raw = await getSetting(CARD_CLOSING_DAY_KEY);
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= 31 ? n : null;
+}
+
+export async function setCardClosingDay(day: number): Promise<void> {
+  if (!Number.isInteger(day) || day < 1 || day > 31) {
+    throw new Error('Día inválido: usá un número entre 1 y 31.');
+  }
+  await setSetting(CARD_CLOSING_DAY_KEY, String(day));
 }
 
 export async function getReminderChatId(): Promise<number | null> {
