@@ -219,7 +219,11 @@ export async function getSplitMeeting(id: string): Promise<SplitMeetingDetail | 
   }));
 
   const balances = computeBalances(members, expenses);
-  const transfers = simplifyDebts(balances);
+  const settlements = await getSettlementAmounts(id);
+  const transfers = simplifyDebts(balances).map((t) => ({
+    ...t,
+    settled: (settlements.get(settlementKey(t.from_id, t.to_id)) ?? 0) >= t.amount,
+  }));
   const total = expenses.reduce((sum, e) => sum + toCents(e.amount), 0);
 
   return { meeting: meeting as SplitMeeting, members, expenses, balances, transfers, total };
@@ -286,4 +290,101 @@ export async function markMemberAddedToJarvis(memberId: string): Promise<void> {
     .update({ added_to_jarvis: true })
     .eq('id', memberId);
   if (error) throw new Error(`No pude marcar el participante: ${error.message}`);
+}
+
+// ---------- Deudas saldadas (marcar quién ya pagó) ----------
+
+function settlementKey(fromId: string, toId: string): string {
+  return `${fromId}>${toId}`;
+}
+
+function migrationMissing(error: { code?: string; message: string }): boolean {
+  return error.code === '42P01' || /split_settlements/i.test(error.message);
+}
+
+/** Par -> monto saldado más reciente (centavos). Degradado si falta la migración 09. */
+async function getSettlementAmounts(meetingId: string): Promise<Map<string, number>> {
+  const { data, error } = await supabaseAdmin
+    .from('split_settlements')
+    .select('from_member_id, to_member_id, amount_cents')
+    .eq('meeting_id', meetingId);
+  if (error) {
+    if (migrationMissing(error)) return new Map();
+    throw new Error(`No pude leer las deudas saldadas: ${error.message}`);
+  }
+  const map = new Map<string, number>();
+  for (const r of data ?? []) {
+    map.set(settlementKey(r.from_member_id, r.to_member_id), Number(r.amount_cents));
+  }
+  return map;
+}
+
+export async function settleTransfer(params: {
+  meeting_id: string;
+  from_id: string;
+  to_id: string;
+  amount_cents: number;
+}): Promise<void> {
+  requireDb();
+  if (!Number.isInteger(params.amount_cents) || params.amount_cents <= 0) {
+    throw new Error(`Monto inválido: ${params.amount_cents}`);
+  }
+  if (params.from_id === params.to_id) {
+    throw new Error('La deuda es entre personas distintas.');
+  }
+
+  const { data: members, error: membersError } = await supabaseAdmin
+    .from('split_members')
+    .select('id')
+    .eq('meeting_id', params.meeting_id)
+    .in('id', [params.from_id, params.to_id]);
+  if (membersError) throw new Error(`No pude verificar los participantes: ${membersError.message}`);
+  if (!members || members.length !== 2) {
+    throw new Error('Los participantes no pertenecen a esta reunión.');
+  }
+
+  // Una sola fila por par: la última suma saldada (unique constraint)
+  const del = await supabaseAdmin
+    .from('split_settlements')
+    .delete()
+    .eq('meeting_id', params.meeting_id)
+    .eq('from_member_id', params.from_id)
+    .eq('to_member_id', params.to_id);
+  if (del.error && migrationMissing(del.error)) {
+    throw new Error('Falta la migración 09_split_settlements.sql — ejecutala en Supabase SQL Editor.');
+  }
+  if (del.error) throw new Error(`No pude marcar la deuda como saldada: ${del.error.message}`);
+
+  const { error } = await supabaseAdmin.from('split_settlements').insert({
+    meeting_id: params.meeting_id,
+    from_member_id: params.from_id,
+    to_member_id: params.to_id,
+    amount_cents: params.amount_cents,
+  });
+  if (error) {
+    if (migrationMissing(error)) {
+      throw new Error('Falta la migración 09_split_settlements.sql — ejecutala en Supabase SQL Editor.');
+    }
+    throw new Error(`No pude marcar la deuda como saldada: ${error.message}`);
+  }
+}
+
+export async function unsettleTransfer(params: {
+  meeting_id: string;
+  from_id: string;
+  to_id: string;
+}): Promise<void> {
+  requireDb();
+  const { error } = await supabaseAdmin
+    .from('split_settlements')
+    .delete()
+    .eq('meeting_id', params.meeting_id)
+    .eq('from_member_id', params.from_id)
+    .eq('to_member_id', params.to_id);
+  if (error) {
+    if (migrationMissing(error)) {
+      throw new Error('Falta la migración 09_split_settlements.sql — ejecutala en Supabase SQL Editor.');
+    }
+    throw new Error(`No pude desmarcar la deuda: ${error.message}`);
+  }
 }

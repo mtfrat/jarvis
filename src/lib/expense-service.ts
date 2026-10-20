@@ -541,7 +541,7 @@ export async function getCardStatement(now: Date = new Date()): Promise<CardStat
 
   return {
     status: dates.status,
-    totalArs: (data || []).reduce((sum, r) => sum + Number(r.amount_ars), 0),
+    totalArs: (data || []).reduce((sum, r) => sum + Math.round(Number(r.amount_ars) * 100), 0) / 100,
     periodStart: ymd(dates.periodStart),
     periodEnd: ymd(dates.periodEnd),
     dueDate: ymd(dates.dueDate),

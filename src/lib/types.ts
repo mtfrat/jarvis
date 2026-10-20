@@ -132,6 +132,7 @@ export interface SplitTransfer {
   to_id: string;
   to_name: string;
   amount: number; // en centavos
+  settled?: boolean; // true si ya la marcaron como saldada
 }
 
 export interface CardStatement {

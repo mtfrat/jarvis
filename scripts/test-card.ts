@@ -195,9 +195,10 @@ async function testDb() {
 
   const stmtAfter = await getCardStatement();
   assert.ok(stmtAfter, '7 statement sigue disponible');
+  const diffCents = Math.round(stmtAfter.totalArs * 100) - Math.round(stmtBefore.totalArs * 100);
   assert.equal(
-    stmtAfter.totalArs - stmtBefore.totalArs,
-    70005 + 70006,
+    diffCents,
+    (70005 + 70006) * 100,
     '8 statement: incluye reintegrable con tarjeta, excluye efectivo'
   );
   console.log('✅3 statement: reintegrable suma en el pago de tarjeta');

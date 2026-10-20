@@ -7,6 +7,7 @@ import {
   PAYMENT_METHODS,
 } from '@/lib/types';
 import type { SplitMeetingSummary, SplitMeetingDetail } from '@/lib/split-service';
+import type { SplitTransfer } from '@/lib/types';
 import { dashboardHeaders } from '@/lib/api-client';
 import { fmtDate } from '@/lib/format';
 
@@ -211,6 +212,29 @@ export function SplitPanel({ onExpenseAdded }: SplitPanelProps) {
       await fetchMeetings();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'No se pudo eliminar.');
+    }
+  };
+
+  const handleSettle = async (t: SplitTransfer, action: 'settle' | 'unsettle') => {
+    if (!detail) return;
+    setError(null);
+    try {
+      const res = await fetch('/api/splits/settlements', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...dashboardHeaders },
+        body: JSON.stringify({
+          meeting_id: detail.meeting.id,
+          from_id: t.from_id,
+          to_id: t.to_id,
+          amount_cents: t.amount,
+          action,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || 'No pude actualizar la deuda.');
+      await fetchDetail(detail.meeting.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido');
     }
   };
 
@@ -661,23 +685,47 @@ export function SplitPanel({ onExpenseAdded }: SplitPanelProps) {
                     : 'Todo saldado — nadie le debe a nadie.'}
                 </p>
               ) : (
-                <ul className="space-y-1.5">
-                  {d.transfers.map((t, i) => (
-                    <li
-                      key={i}
-                      className="flex items-center justify-between p-2.5 bg-[#18181b] border border-[#27272a] rounded-lg text-xs"
-                    >
-                      <span className="text-zinc-300">
-                        <span className="text-rose-400 font-medium">{t.from_name}</span>
-                        <span className="text-zinc-500"> le debe </span>
-                        <span className="text-emerald-400 font-medium">{t.to_name}</span>
-                      </span>
-                      <span className="font-mono text-white font-semibold">
-                        {formatMoney(t.amount, currency)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="space-y-1.5">
+                    {d.transfers.map((t, i) => (
+                      <li
+                        key={i}
+                        className={`flex items-center justify-between gap-2 p-2.5 bg-[#18181b] border rounded-lg text-xs ${
+                          t.settled ? 'border-emerald-500/30' : 'border-[#27272a]'
+                        }`}
+                      >
+                        <span className={`flex items-center gap-1.5 ${t.settled ? 'opacity-70' : ''}`}>
+                          {t.settled && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                          <span className="text-rose-400 font-medium">{t.from_name}</span>
+                          <span className="text-zinc-500"> le debe </span>
+                          <span className="text-emerald-400 font-medium">{t.to_name}</span>
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span
+                            className={`font-mono font-semibold ${
+                              t.settled ? 'text-zinc-500 line-through' : 'text-white'
+                            }`}
+                          >
+                            {formatMoney(t.amount, currency)}
+                          </span>
+                          <button
+                            onClick={() => handleSettle(t, t.settled ? 'unsettle' : 'settle')}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+                              t.settled
+                                ? 'border-[#27272a] text-zinc-400 hover:text-white hover:border-zinc-500'
+                                : 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                            }`}
+                          >
+                            {t.settled ? '↺ Deshacer' : '✓ Pagada'}
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-[10px] text-zinc-600 mt-1">
+                    Tildá cada deuda como pagada cuando te compensen.
+                  </p>
+                </>
               )}
             </div>
 

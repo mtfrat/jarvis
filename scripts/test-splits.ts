@@ -12,6 +12,8 @@ import {
   addSplitExpense,
   deleteSplitMeeting,
   markMemberAddedToJarvis,
+  settleTransfer,
+  unsettleTransfer,
 } from '../src/lib/split-service';
 import { isSupabaseConfigured } from '../src/lib/supabase';
 
@@ -260,6 +262,114 @@ async function testIntegration() {
       'pagador externo rechazado'
     );
     console.log('✅7 pagador ajeno rechazado');
+
+    // ✅8 Deudas saldadas: marcar/desmarcar por deuda (requiere migración 09)
+    try {
+      const findPair = (
+        d: NonNullable<Awaited<ReturnType<typeof getSplitMeeting>>>,
+        from: string,
+        to: string
+      ) => d.transfers.find((t) => t.from_id === from && t.to_id === to);
+
+      const d0 = await getSplitMeeting(meeting.id);
+      assert.equal(d0!.transfers.length, 2);
+      assert.ok(
+        d0!.transfers.every((t) => !t.settled),
+        'inicial: ninguna deuda saldada'
+      );
+
+      const t0 = d0!.transfers[0];
+      await settleTransfer({
+        meeting_id: meeting.id,
+        from_id: t0.from_id,
+        to_id: t0.to_id,
+        amount_cents: t0.amount,
+      });
+      let d1 = (await getSplitMeeting(meeting.id))!;
+      assert.equal(findPair(d1, t0.from_id, t0.to_id)?.settled, true, 'marcada como saldada');
+      const other = d1.transfers.find(
+        (t) => t.from_id !== t0.from_id || t.to_id !== t0.to_id
+      );
+      assert.equal(other?.settled, false, 'la otra sigue pendiente');
+
+      // Monto saldado menor que la deuda → no la cubre
+      await settleTransfer({
+        meeting_id: meeting.id,
+        from_id: t0.from_id,
+        to_id: t0.to_id,
+        amount_cents: t0.amount - 100,
+      });
+      d1 = (await getSplitMeeting(meeting.id))!;
+      assert.equal(
+        findPair(d1, t0.from_id, t0.to_id)?.settled,
+        false,
+        'monto menor no cubre la deuda'
+      );
+
+      // Monto completo otra vez → saldada
+      await settleTransfer({
+        meeting_id: meeting.id,
+        from_id: t0.from_id,
+        to_id: t0.to_id,
+        amount_cents: t0.amount,
+      });
+      d1 = (await getSplitMeeting(meeting.id))!;
+      assert.equal(findPair(d1, t0.from_id, t0.to_id)?.settled, true, 'saldada con monto completo');
+
+      // Gasto nuevo → cambian los montos → deudas viejas no cubren las nuevas
+      await addSplitExpense({
+        meeting_id: meeting.id,
+        description: 'Propina',
+        amount: 39000,
+        paid_by: detail!.members[2].id,
+      });
+      const d2 = (await getSplitMeeting(meeting.id))!;
+      assert.ok(
+        d2.transfers.some((t) => !t.settled),
+        'gasto nuevo → al menos una deuda pendiente'
+      );
+
+      // Validación: participante ajeno a la reunión
+      await assert.rejects(
+        () =>
+          settleTransfer({
+            meeting_id: meeting.id,
+            from_id: '00000000-0000-0000-0000-000000000000',
+            to_id: detail!.members[0].id,
+            amount_cents: 100,
+          }),
+        /no pertenece/,
+        'settle con miembro externo rechazado'
+      );
+
+      // Marcar y desmarcar una pendiente
+      const pend = d2.transfers.find((t) => !t.settled)!;
+      await settleTransfer({
+        meeting_id: meeting.id,
+        from_id: pend.from_id,
+        to_id: pend.to_id,
+        amount_cents: pend.amount,
+      });
+      let d3 = (await getSplitMeeting(meeting.id))!;
+      assert.equal(findPair(d3, pend.from_id, pend.to_id)?.settled, true, 'saldada tras marcar');
+      await unsettleTransfer({
+        meeting_id: meeting.id,
+        from_id: pend.from_id,
+        to_id: pend.to_id,
+      });
+      d3 = (await getSplitMeeting(meeting.id))!;
+      assert.equal(findPair(d3, pend.from_id, pend.to_id)?.settled, false, 'unsettle la deja pendiente');
+
+      console.log('✅8 settle/unsettle: marcar deuda por deuda, >=, staleness, validación');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/09_split_settlements|split_settlements/i.test(msg)) {
+        console.log('⏭️8 deudas saldadas omitida — migración 09_split_settlements.sql no ejecutada');
+        console.log('   Correla en Supabase SQL Editor y re-ejecutá: npm run test:splits');
+      } else {
+        throw err;
+      }
+    }
 
     console.log('🎉 Integración OK');
   } finally {
